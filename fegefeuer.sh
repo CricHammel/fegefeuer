@@ -500,6 +500,17 @@ befehl_apply() {
   local anzahl; anzahl="$(awk -F'\t' '$1=="go"' "$KANDIDATEN" | wc -l | tr -d ' ')"
   [ "$anzahl" -eq 0 ] && { warn "Nichts markiert. Erst '$0 review'."; return 0; }
 
+  # Waehrend eines Laufs liegen Original und neue Fassung gleichzeitig da.
+  # Als Puffer die groesste ausgewaehlte Datei plus etwas Luft.
+  local groesste frei
+  groesste="$(awk -F'\t' '$1=="go" && $9+0 > m { m=$9 } END{ print m+0 }' "$VIDEOLISTE")"
+  frei="$(freier_platz_kb "$HOME")"
+  if [ "${frei:-0}" -lt $(( groesste + 1048576 )) ]; then
+    fehler "Zu wenig Platz: $(mb "$frei") frei, mindestens $(mb $((groesste + 1048576))) nötig."
+    info "${grau}Während des Kodierens liegen Original und neue Fassung gleichzeitig auf der Platte.${aus}"
+    return 1
+  fi
+
   local stapel; stapel="$(date '+%Y-%m-%d_%H%M%S')"
   local ziel="$QUARANTAENE/$stapel"
   local manifest="$ziel/_manifest.tsv"
@@ -542,9 +553,9 @@ befehl_apply() {
     local zielpfad="$ziel/$rel"
     mkdir -p "$(dirname "$zielpfad")"
     if mv "$pfad" "$zielpfad" 2>/dev/null; then
-      # Vierte Spalte: nicht bloss beiseitegelegt, sondern durch eine neu
-    # kodierte Fassung ersetzt. pruefen und purge muessen das auseinanderhalten.
-    printf '%s\t%s\t%s\t%s\n' "$rel" "$pfad" "$kb" "ersetzt" >> "$manifest"
+    # Vierte Spalte haelt fest, wie der Eintrag hierher kam.
+    # "verschoben": beiseitegelegt, der Originalort ist frei.
+    printf '%s\t%s\t%s\t%s\n' "$rel" "$pfad" "$kb" "verschoben" >> "$manifest"
       verschoben=$((verschoben+1))
       printf '  %s✓%s %s\n' "$gruen" "$aus" "${pfad/#$HOME/$TILDE}"
     else
@@ -764,7 +775,9 @@ befehl_pruefen() {
     gesamt_ersetzt=$((gesamt_ersetzt + e)); kb_ersetzt=$((kb_ersetzt + ekb))
   done
 
-  info "\n${fett}Zusammen:${aus} $gesamt_wieder wieder da ($(mb "$kb_wieder")), $gesamt_fehlt verschwunden ($(mb "$kb_fehlt"))${gesamt_ersetzt:+, $gesamt_ersetzt ersetzt ($(mb "$kb_ersetzt"))}"
+  local zusatz=""
+  [ "$gesamt_ersetzt" -gt 0 ] && zusatz=", $gesamt_ersetzt ersetzt ($(mb "$kb_ersetzt"))"
+  info "\n${fett}Zusammen:${aus} $gesamt_wieder wieder da ($(mb "$kb_wieder")), $gesamt_fehlt verschwunden ($(mb "$kb_fehlt"))$zusatz"
 }
 
 befehl_purge() {
@@ -1400,6 +1413,17 @@ befehl_video_run() {
   local ok; read -r ok || ok=n
   case "$ok" in j|J) ;; *) info "Abgebrochen."; return 0;; esac
 
+  # Waehrend eines Laufs liegen Original und neue Fassung gleichzeitig da.
+  # Als Puffer die groesste ausgewaehlte Datei plus etwas Luft.
+  local groesste frei
+  groesste="$(awk -F'\t' '$1=="go" && $9+0 > m { m=$9 } END{ print m+0 }' "$VIDEOLISTE")"
+  frei="$(freier_platz_kb "$HOME")"
+  if [ "${frei:-0}" -lt $(( groesste + 1048576 )) ]; then
+    fehler "Zu wenig Platz: $(mb "$frei") frei, mindestens $(mb $((groesste + 1048576))) nötig."
+    info "${grau}Während des Kodierens liegen Original und neue Fassung gleichzeitig auf der Platte.${aus}"
+    return 1
+  fi
+
   local stapel; stapel="$(date '+%Y-%m-%d_%H%M%S')"
   local ziel="$QUARANTAENE/$stapel"
   local manifest="$ziel/_manifest.tsv"
@@ -1441,10 +1465,20 @@ befehl_video_run() {
       # min() verhindert, dass kleinere Videos hochskaliert werden
       skalierung=(-vf "scale=-2:'min($zielhoehe,ih)'")
     fi
+    # -map 0:v:0 -map 0:a? nimmt alle Tonspuren mit. Ohne -map waehlt ffmpeg
+    # nur eine aus, und 16 der Testdateien hatten zwei.
     if ! ffmpeg -hide_banner -nostats -loglevel error -i "$quelle" \
+         -map 0:v:0 -map "0:a?" \
          "${skalierung[@]+"${skalierung[@]}"}" "${enc[@]}" -c:a copy -movflags +faststart "$neu" -y 2>/dev/null; then
-      printf '  %s✗%s Kodieren fehlgeschlagen\n' "$rot" "$aus"
-      misslungen=$((misslungen+1)); rm -f "$neu"; rm -rf "$tmpdir/aus"; continue
+      # Manche Kameras legen Ton ab, den ein MP4 nicht aufnimmt (etwa PCM).
+      # Dann neu kodieren statt aufzugeben.
+      printf '  %sTon lässt sich nicht übernehmen, kodiere ihn neu …%s\n' "$grau" "$aus"
+      if ! ffmpeg -hide_banner -nostats -loglevel error -i "$quelle" \
+           -map 0:v:0 -map "0:a?" \
+           "${skalierung[@]+"${skalierung[@]}"}" "${enc[@]}" -c:a aac -b:a 192k -movflags +faststart "$neu" -y 2>/dev/null; then
+        printf '  %s✗%s Kodieren fehlgeschlagen\n' "$rot" "$aus"
+        misslungen=$((misslungen+1)); rm -f "$neu"; rm -rf "$tmpdir/aus"; continue
+      fi
     fi
     local dauer_s=$(( $(date +%s) - start ))
 
@@ -1468,6 +1502,13 @@ befehl_video_run() {
 
     local zielname="${pfad%.zip}"
     zielname="${zielname%.*}.mp4"
+    # Aus film.mov wird film.mp4 -- das darf keine fremde Datei ueberschreiben.
+    if [ -e "$zielname" ] && [ "$zielname" != "$pfad" ]; then
+      local i=2
+      while [ -e "${zielname%.mp4} ($i).mp4" ]; do i=$((i+1)); done
+      zielname="${zielname%.mp4} ($i).mp4"
+      warn "  Zielname war belegt, lege ab als $(basename "$zielname")"
+    fi
     mv "$neu" "$zielname"
     rm -rf "$tmpdir/aus"
 
