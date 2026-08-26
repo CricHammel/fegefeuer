@@ -1,0 +1,17 @@
+# Vom Skript erzeugte Daten. Diese Dateien enthalten die Pfade, Dateinamen
+# und Programmreste des jeweiligen Rechners und gehören niemandem sonst.
+kandidaten.tsv
+kandidaten.tsv.*
+bericht.md
+brew-vorschlag.sh
+
+# Arbeitsverzeichnis: Hashes, Zwischenstände, Sicherungskopien
+.arbeit/
+
+# Das Fegefeuer liegt unter ~/.fegefeuer, also außerhalb des Repos --
+# hier nur zur Sicherheit, falls jemand es herkopiert.
+.fegefeuer/
+.aufraeumen-quarantaene/
+
+# macOS
+.DS_Store
