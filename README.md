@@ -169,8 +169,25 @@ Die lohnendsten Fäden sind die, an denen ein kleines Paket ein großes mitzieht
 ```bash
 ./fegefeuer.sh video scan [verzeichnis]   # vermessen, nichts anfassen
 ./fegefeuer.sh video review               # auswählen
-./fegefeuer.sh video run --profil sparsam # kodieren, prüfen, Original sichern
+./fegefeuer.sh video run                  # kodieren, prüfen, Original sichern
 ```
+
+`video run` ohne `--profil` fragt nach und zeigt dabei die Zahlen für **deine**
+gerade ausgewählten Dateien, nicht allgemeine Richtwerte:
+
+```
+Womit kodieren?  Zahlen für deine 17 ausgewählten Dateien:
+
+  1) schnell   VideoToolbox q60       9,71 GB → 2,62 GB    7,09 GB gespart   ~17 min
+     Hardware-Chip des Macs, rund fünfmal schneller
+  2) sparsam   x265 veryfast crf24    9,71 GB → 1,90 GB    7,81 GB gespart   ~76 min
+     rechnet auf allen Kernen, Ergebnis rund ein Viertel kleiner
+```
+
+Für Skripte nimmt `--profil schnell` oder `--profil sparsam` die Frage vorweg.
+Einen stillen Standardwert gibt es bewusst nicht — wer nichts angibt und
+nichts eingeben kann, bekommt einen Fehler statt einer stillschweigend
+getroffenen Entscheidung.
 
 Videos sind ein Sonderfall und deshalb ein eigener Unterbefehl: Neukodieren
 *verschiebt* nichts, es **erzeugt eine neue, verlustbehaftete Datei**. Ein `go`
@@ -189,16 +206,17 @@ weniger als 50 MB zu erwartendem Gewinn, und Zeitraffer unter 5 fps — dort
 sagt bpp nichts Sinnvolles. Alle drei werden gezählt und benannt, nicht
 stillschweigend übergangen.
 
-Am Ende stehen zwei Profile mit gemessenen Zahlen, damit die Wahl zwischen
-Tempo und Ersparnis auf Daten beruht und nicht auf einer nackten `-crf`-Zahl:
+Die beiden Profile, gemessen an 4K60-Material:
 
 | Profil | Encoder | Ergebnis | Tempo |
 |---|---|---|---|
-| `schnell` | VideoToolbox q60 | ~32 % der Größe | 0,83× Echtzeit bei 4K60 |
-| `sparsam` | x265 `veryfast` crf24 | ~23 % der Größe | 0,18× Echtzeit bei 4K60 |
+| `schnell` | VideoToolbox q60 | ~32 % der Größe | 0,83× Echtzeit |
+| `sparsam` | x265 `veryfast` crf24 | ~23 % der Größe | 0,18× Echtzeit |
 
 Bei nahezu gleicher Qualität — SSIM 0,9855 gegen 0,9839, im direkten
-Bildvergleich nicht unterscheidbar.
+Bildvergleich nicht unterscheidbar. Die Wahl ist also keine zwischen gut und
+schlecht, sondern zwischen Zeit und Platz. `./fegefeuer.sh video` listet die
+Profile jederzeit auf.
 
 ### Die Prüfung
 

@@ -937,6 +937,26 @@ VIDEO_SCHWELLE_MODERN="0.15"
 # Unter diesem Gewinn lohnt der Aufwand nicht, egal wie ueppig kodiert.
 VIDEO_MINDESTGEWINN_KB="51200"
 
+# Ein Profil an genau einer Stelle beschrieben: Name, Encoder-Parameter,
+# erwartete Ausgabe-bpp, Tempo in Pixeln je Sekunde, Merksatz.
+video_profil_encoder() {
+  case "$1" in
+    schnell) printf '%s\n' "-c:v" "hevc_videotoolbox" "-q:v" "60";;
+    sparsam) printf '%s\n' "-c:v" "libx265" "-crf" "24" "-preset" "veryfast";;
+    *) return 1;;
+  esac
+}
+video_profil_beschreibung() {
+  case "$1" in
+    schnell) echo "VideoToolbox q60|Hardware-Chip des Macs, rund fünfmal schneller";;
+    sparsam) echo "x265 veryfast crf24|rechnet auf allen Kernen, Ergebnis rund ein Viertel kleiner";;
+    *) return 1;;
+  esac
+}
+# Zeilenweise, nicht durch Leerzeichen getrennt: das Skript setzt oben
+# IFS=$'\n\t', Leerzeichen trennt also keine Woerter.
+video_profil_namen() { printf '%s\n' "schnell" "sparsam"; }
+
 video_werkzeuge_pruefen() {
   local fehlt=""
   command -v ffmpeg  >/dev/null 2>&1 || fehlt="$fehlt ffmpeg"
@@ -1243,28 +1263,84 @@ befehl_video_review() {
   [ "$n_go" -gt 0 ] && info "Weiter: ${fett}$0 video run --profil sparsam${aus}"
 }
 
+# Zeigt beide Profile mit den Zahlen der tatsaechlich ausgewaehlten Dateien
+# und fragt. Ergebnis in VIDEO_PROFIL.
+video_profil_waehlen() {
+  local werte
+  werte="$(LC_ALL=C awk -F'\t' -v ts="$VIDEO_TEMPO_SCHNELL" -v tp="$VIDEO_TEMPO_SPARSAM" '
+    $1=="go" { belegt+=$9; sch+=$13; spa+=$14; pxs=$5*$6*$7; zs+=pxs*$8/ts; zp+=pxs*$8/tp }
+    END { printf "%d\t%d\t%d\t%.1f\t%.1f", belegt, sch, spa, zs/60, zp/60 }' "$VIDEOLISTE")"
+  local belegt sch spa zs zp
+  IFS=$'\t' read -r belegt sch spa zs zp <<< "$werte"
+
+  info "\n${fett}Womit kodieren?${aus}  ${grau}Zahlen für deine $1 ausgewählten Dateien:${aus}\n"
+  local i=0 name b enc merk
+  for name in $(video_profil_namen); do
+    i=$((i+1))
+    b="$(video_profil_beschreibung "$name")"
+    enc="${b%%|*}"; merk="${b#*|}"
+    local danach zeit rumpf
+    if [ "$name" = "schnell" ]; then danach="$sch"; zeit="$zs"; else danach="$spa"; zeit="$zp"; fi
+    # Erst den Text bauen, dann faerben -- Farbcodes mitten in der Formatzeile
+    # bringen die Argumentzahl leicht durcheinander.
+    rumpf="$(printf '%-9s %-22s %9s → %-9s  %8s gespart   ~%s min' \
+      "$name" "$enc" "$(mb "$belegt")" "$(mb "$danach")" \
+      "$(mb $((belegt - danach)))" "$(zahl "$zeit" 0)")"
+    printf '  %s%d)%s %s\n' "$fett" "$i" "$aus" "$rumpf"
+    printf '     %s%s%s\n' "$grau" "$merk" "$aus"
+  done
+  info "\n  ${grau}Die Bildqualität ist praktisch gleich — gemessen SSIM 0,9855 gegen 0,9839,"
+  info "  im direkten Bildvergleich nicht unterscheidbar. Es geht nur um Zeit gegen Platz.${aus}"
+
+  local antwort
+  while true; do
+    printf '\n  Profil [1/2 oder Name, q=Abbruch] → '
+    if ! read -r antwort; then
+      # Keine Eingabe da -- etwa in einem Skript ohne --profil
+      printf '\n'
+      fehler "Keine Eingabe. Bitte --profil schnell oder --profil sparsam angeben."
+      return 1
+    fi
+    case "$antwort" in
+      1) VIDEO_PROFIL="schnell"; return 0;;
+      2) VIDEO_PROFIL="sparsam"; return 0;;
+      schnell|sparsam) VIDEO_PROFIL="$antwort"; return 0;;
+      q|Q) return 1;;
+      *) printf '  %sBitte 1, 2, schnell, sparsam oder q%s\n' "$gelb" "$aus";;
+    esac
+  done
+}
+
 befehl_video_run() {
   video_werkzeuge_pruefen || return 1
   [ -s "$VIDEOLISTE" ] || { fehler "Keine Videoliste. Erst '$0 video scan'."; return 1; }
-  local profil="sparsam"
+  local profil=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --profil) shift; profil="${1:-sparsam}";;
+      --profil) shift; profil="${1:-}";;
       --profil=*) profil="${1#*=}";;
       *) fehler "Unbekannte Option: $1"; return 1;;
     esac
     shift
   done
-  local -a enc
-  case "$profil" in
-    schnell) enc=(-c:v hevc_videotoolbox -q:v 60);;
-    sparsam) enc=(-c:v libx265 -crf 24 -preset veryfast);;
-    *) fehler "Profil muss 'schnell' oder 'sparsam' sein."; return 1;;
-  esac
 
   local anzahl
   anzahl="$(awk -F'\t' '$1=="go"' "$VIDEOLISTE" | wc -l | tr -d ' ')"
   [ "$anzahl" -eq 0 ] && { warn "Nichts freigegeben. Erst '$0 video review'."; return 0; }
+
+  # Kein stiller Standardwert: entweder ausdruecklich angegeben oder gefragt.
+  if [ -z "$profil" ]; then
+    VIDEO_PROFIL=""
+    video_profil_waehlen "$anzahl" || { info "Abgebrochen."; return 0; }
+    profil="$VIDEO_PROFIL"
+  fi
+  local -a enc=()
+  local zeile_enc
+  while IFS= read -r zeile_enc; do enc+=("$zeile_enc"); done < <(video_profil_encoder "$profil")
+  if [ ${#enc[@]} -eq 0 ]; then
+    fehler "Unbekanntes Profil '$profil'. Möglich sind: $(video_profil_namen | tr '\n' ' ')"
+    return 1
+  fi
 
   local spalte=14; [ "$profil" = "schnell" ] && spalte=13
   local erwartet
@@ -1375,7 +1451,15 @@ befehl_video() {
     *) info "${fett}$0 video${aus} <scan|review|run>"
        info "  ${fett}scan${aus} [pfad]              vermessen, nichts anfassen"
        info "  ${fett}review${aus}                   auswählen, was neu kodiert wird"
-       info "  ${fett}run${aus} --profil schnell|sparsam   kodieren, prüfen, Original ins Fegefeuer";;
+       info "  ${fett}run${aus} [--profil <name>]      kodieren, prüfen, Original ins Fegefeuer"
+       info "                             ${grau}ohne --profil wird gefragt${aus}"
+       echo
+       info "  ${fett}Profile${aus}"
+       local pn pb
+       for pn in $(video_profil_namen); do
+         pb="$(video_profil_beschreibung "$pn")"
+         printf '    %s%-9s%s %-22s %s%s%s\n' "$fett" "$pn" "$aus" "${pb%%|*}" "$grau" "${pb#*|}" "$aus"
+       done;;
   esac
 }
 
