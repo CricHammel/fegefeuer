@@ -79,6 +79,23 @@ Für ganze Kategorien geht es auch ohne Einzelfragen:
 ./fegefeuer.sh mark cache go     # dann pauschal freigeben
 ```
 
+## Fortschritt
+
+Die langen Schritte melden, wie weit sie sind — das Sammeln der Prüfsummen,
+das Vermessen der Videos, das Kodieren und die Prüfung danach:
+
+```
+  ██████████░░░░░░░░░░░░   46%  kodiere  noch 3:20
+```
+
+Die Anzeige geht auf **stderr**, nicht auf stdout. Das ist kein Detail: Die
+Prüfung wird als `grund="$(video_pruefen …)"` aufgerufen, und ein Balken auf
+stdout landete prompt im Rückgabewert — die Ausgabe meldete daraufhin
+„SSIM 0,000". Auf stderr bleiben Pipelines und Logdateien sauber.
+
+Ohne Terminal erscheint nichts. `FEGEFEUER_FORTSCHRITT=1` erzwingt die
+Anzeige, `=0` schaltet sie ab.
+
 ## Das Sicherheitsnetz
 
 **Nichts wird beim Aufräumen gelöscht.** `apply` verschiebt nach
@@ -272,6 +289,13 @@ nicht dasselbe Bild trifft. Gute Kodierungen wären so verworfen worden. Der
 vollständige Durchlauf dekodiert beide Dateien ohnehin und ersetzt damit
 zugleich die Prüflesung; er kostet rund die Hälfte der Kodierzeit beim
 schnellen Profil und ein Zehntel beim sparsamen.
+
+Die SSIM-Untergrenze liegt bei 0,90. Gemessene Werte echter Kodierungen lagen
+zwischen 0,93 bei viel Bewegung und 0,99 bei ruhigen Aufnahmen, eine
+absichtlich zerstörte Fassung kam auf 0,87 — der Abstand ist also knapp.
+Lieber einmal zu viel ablehnen: Das Original bleibt dabei unangetastet, es
+entfällt nur die Ersparnis. Mit `FEGEFEUER_SSIM_MIN` lässt sich die Grenze
+verschieben.
 
 Das Original landet mit einem Vermerk im Fegefeuer, der es von verschobenen
 Dateien unterscheidet. Das ist wichtig: Am Originalort liegt danach die neue

@@ -49,6 +49,63 @@ pruefe_umgebung() {
   return 0
 }
 
+# ---------- Fortschritt ----------
+# Eine Zeile, die sich selbst ueberschreibt. Nur am Terminal -- in einer
+# Pipeline oder einem Logfile waere das nur Rauschen.
+FORTSCHRITT_BEGINN=0
+FORTSCHRITT_LETZTE=0
+
+# FEGEFEUER_FORTSCHRITT: 1 erzwingt die Anzeige, 0 schaltet sie ab,
+# ohne Angabe entscheidet, ob die Ausgabe an einem Terminal haengt.
+fortschritt_sichtbar() {
+  case "${FEGEFEUER_FORTSCHRITT:-}" in
+    1) return 0;;
+    0) return 1;;
+    *) [ -t 2 ];;
+  esac
+}
+
+wiederhole() {   # wiederhole <anzahl> <zeichen>
+  local n="$1" z="$2" ergebnis=""
+  while [ "$n" -gt 0 ]; do ergebnis="$ergebnis$z"; n=$((n - 1)); done
+  printf '%s' "$ergebnis"
+}
+
+fortschritt_start() { FORTSCHRITT_BEGINN="$(date +%s)"; FORTSCHRITT_LETZTE=0; }
+
+fortschritt() {   # fortschritt <fertig> <gesamt> <text>
+  fortschritt_sichtbar || return 0
+  local fertig="$1" gesamt="$2" text="$3"
+  [ "${gesamt:-0}" -gt 0 ] || return 0
+  # Hoechstens einmal je Sekunde neu zeichnen, ausser beim letzten Schritt
+  local jetzt; jetzt="$(date +%s)"
+  if [ "$jetzt" = "$FORTSCHRITT_LETZTE" ] && [ "$fertig" -lt "$gesamt" ]; then return 0; fi
+  FORTSCHRITT_LETZTE="$jetzt"
+
+  local breite=22 voll anteil verstrichen rest=""
+  [ "$fertig" -gt "$gesamt" ] && fertig="$gesamt"
+  anteil=$(( fertig * 100 / gesamt ))
+  voll=$(( fertig * breite / gesamt ))
+  verstrichen=$(( jetzt - FORTSCHRITT_BEGINN ))
+  if [ "$fertig" -gt 0 ] && [ "$verstrichen" -gt 3 ] && [ "$fertig" -lt "$gesamt" ]; then
+    local uebrig=$(( verstrichen * gesamt / fertig - verstrichen ))
+    [ "$uebrig" -gt 0 ] && rest="$(printf '  noch %d:%02d' $((uebrig / 60)) $((uebrig % 60)))"
+  fi
+  printf '\r  %s%s%s%s  %3d%%  %s%s%s\033[K' \
+    "$blau" "$(wiederhole "$voll" '█')" "$(wiederhole $((breite - voll)) '░')" "$aus" \
+    "$anteil" "$grau" "$text$rest" "$aus" >&2
+}
+
+fortschritt_offen() {   # wenn die Gesamtzahl nicht bekannt ist
+  fortschritt_sichtbar || return 0
+  local jetzt; jetzt="$(date +%s)"
+  if [ "$jetzt" = "$FORTSCHRITT_LETZTE" ]; then return 0; fi
+  FORTSCHRITT_LETZTE="$jetzt"
+  printf '\r  %s%s%s\033[K' "$grau" "$1" "$aus" >&2
+}
+
+fortschritt_ende() { fortschritt_sichtbar && printf '\r\033[K' >&2; return 0; }
+
 # ---------- Schutzliste ----------
 # Diese Pfade werden NIE angefasst, egal was in der Kandidatenliste steht.
 ist_geschuetzt() {
@@ -110,13 +167,22 @@ kandidat_schreiben() {
 befehl_scan() {
   : > "$KANDIDATEN.tmp"
   titel "1/5  Verwaiste App-Reste in ~/Library"
-  local geprueft=0 gefunden=0
-  for ordner in "Application Support" "Caches" "Containers" "Group Containers" \
-                "Saved Application State" "HTTPStorages" "WebKit" "Application Scripts" "Logs"; do
+  local -a ordnerliste=("Application Support" "Caches" "Containers" "Group Containers" \
+                        "Saved Application State" "HTTPStorages" "WebKit" "Application Scripts" "Logs")
+  # Erst zaehlen, damit der Balken einen Bezugspunkt hat
+  local zu_pruefen=0 o
+  for o in "${ordnerliste[@]}"; do
+    [ -d "$HOME/Library/$o" ] && zu_pruefen=$(( zu_pruefen + $(ls -1 "$HOME/Library/$o" 2>/dev/null | wc -l) ))
+  done
+  fortschritt_start
+  local geprueft=0 gefunden=0 gesehen=0
+  for ordner in "${ordnerliste[@]}"; do
     local voll="$HOME/Library/$ordner"
     [ -d "$voll" ] || continue
     for e in "$voll"/*; do
       [ -e "$e" ] || continue
+      gesehen=$((gesehen + 1))
+      fortschritt "$gesehen" "$zu_pruefen" "Library-Ordner gegen installierte Apps prüfen"
       local b; b="$(basename "$e")"
       case "$b" in com.apple.*|group.com.apple.*|.DS_Store) continue;; esac
       ist_geschuetzt "$e" && continue
@@ -140,6 +206,7 @@ befehl_scan() {
       fi
     done
   done
+  fortschritt_ende
   info "  $geprueft geprüft, ${fett}$gefunden${aus} ohne zugehörige App"
 
   titel "2/5  Caches, die sich selbst neu aufbauen"
@@ -193,8 +260,11 @@ befehl_scan() {
   info "  fertig"
 
   titel "4/5  Große Dateien (>200 MB)"
-  local n=0
+  fortschritt_start
+  local n=0 durchsucht=0
   while IFS= read -r -d '' f; do
+    durchsucht=$((durchsucht + 1))
+    fortschritt_offen "durchsuche … $durchsucht Treffer geprüft"
     ist_geschuetzt "$f" && continue
     kandidat_schreiben "gross" \
       "$(du -sk "$f" 2>/dev/null | cut -f1)" \
@@ -204,20 +274,41 @@ befehl_scan() {
   done < <(find "$HOME" -type f -size +200M \
              ! -path "*/Library/Mobile Documents/*" \
              ! -path "*/.photoslibrary/*" -print0 2>/dev/null)
+  fortschritt_ende
   info "  ${fett}$n${aus} gefunden"
 
   titel "5/5  Doppelte Dateien (>1 MB, gleicher Inhalt)"
   local hashdatei="$ARBEIT/hashes.tsv"
+  local dateiliste="$ARBEIT/hash_liste.txt"
+  local rohhashes="$ARBEIT/hash_roh.txt"
   # ~/Library bleibt komplett aussen vor: dort liegen Systemindex und
   # OneDrive-Sync -- gleiche Inhalte sind da gewollt bzw. serverseitig.
+  fortschritt_start
+  fortschritt_offen "Dateien sammeln …"
   find "$HOME" -type f -size +1M \
     ! -path "$HOME/Library/*" ! -path "*/.Trash/*" ! -path "*/node_modules/*" \
     ! -path "*/.git/*" ! -path "*/.nvm/*" ! -path "*/.pyenv/*" ! -path "*/.m2/*" \
     ! -path "*/.cargo/*" ! -path "*/.photoslibrary/*" \
-    -print0 2>/dev/null \
-  | xargs -0 -P 8 -n 200 shasum -a 1 2>/dev/null \
-  | awk '{ print substr($0,1,40) "\t" substr($0,43) }' \
-  | sort > "$hashdatei"
+    -print0 2>/dev/null > "$dateiliste"
+  local zu_hashen
+  zu_hashen="$(tr -dc '\0' < "$dateiliste" | wc -c | tr -d ' ')"
+  fortschritt_ende
+  info "  ${grau}$zu_hashen Dateien werden geprüft${aus}"
+
+  : > "$rohhashes"
+  fortschritt_start
+  xargs -0 -P 8 -n 200 shasum -a 1 < "$dateiliste" > "$rohhashes" 2>/dev/null &
+  local hash_pid=$!
+  while kill -0 "$hash_pid" 2>/dev/null; do
+    fortschritt "$(wc -l < "$rohhashes" | tr -d ' ')" "$zu_hashen" "Prüfsummen berechnen"
+    sleep 1
+  done
+  wait "$hash_pid" 2>/dev/null
+  fortschritt "$zu_hashen" "$zu_hashen" "Prüfsummen berechnen"
+  fortschritt_ende
+
+  awk '{ print substr($0,1,40) "\t" substr($0,43) }' "$rohhashes" | sort > "$hashdatei"
+  rm -f "$dateiliste" "$rohhashes"
 
   # Pro Gruppe bleibt die erste Datei unangetastet, die weiteren werden
   # vorgeschlagen -- welche Kopie wirklich weg soll, entscheidest du im review.
@@ -229,7 +320,7 @@ befehl_scan() {
       "$(du -sk "$p" 2>/dev/null | cut -f1)" \
       "$(stat -f '%Sm' -t '%Y-%m-%d' "$p" 2>/dev/null)" \
       "$p" "gleicher Inhalt wie ${original/#$HOME/$TILDE}"
-    dubletten=$((dubletten+1))
+    dubletten=$((dubletten + 1))
   done < <(awk -F'\t' '{ if ($1==letzter) print $0 "\t" ersterpfad; else { letzter=$1; ersterpfad=$2 } }' "$hashdatei")
   info "  ${fett}$dubletten${aus} ueberzaehlige Kopien"
 
@@ -981,6 +1072,33 @@ video_profil_encoder() {
 
 video_profil_feld() { video_profil_daten "$1" | cut -d'|' -f"$2"; }
 
+# Fuehrt ffmpeg aus und zeigt dabei, wie weit es ist. ffmpeg meldet ueber
+# -progress fortlaufend out_time_us (Mikrosekunden des fertigen Materials).
+video_ffmpeg() {   # video_ffmpeg <dauer_s> <text> <ffmpeg-argumente...>
+  local dauer="$1" text="$2"; shift 2
+  local meldedatei="$ARBEIT/ff_fortschritt.txt"
+  : > "$meldedatei"
+  ffmpeg -hide_banner -nostats -loglevel error -progress "$meldedatei" "$@" -y 2>/dev/null &
+  local ff=$!
+  local gesamt_ms
+  gesamt_ms="$(LC_ALL=C awk -v d="$dauer" 'BEGIN{ printf "%d", d * 1000 }')"
+  fortschritt_start
+  local us
+  while kill -0 "$ff" 2>/dev/null; do
+    us="$(grep '^out_time_us=' "$meldedatei" 2>/dev/null | tail -1 | cut -d= -f2)"
+    case "$us" in
+      ''|*[!0-9]*) ;;
+      *) fortschritt "$((us / 1000))" "$gesamt_ms" "$text";;
+    esac
+    sleep 1
+  done
+  wait "$ff"
+  local rc=$?
+  fortschritt_ende
+  rm -f "$meldedatei"
+  return "$rc"
+}
+
 # Schaetzt fuer alle 'go'-Eintraege der Liste: belegt, danach, Minuten.
 # ziel_h = 0 heisst Auflösung beibehalten, sonst auf diese Höhe verkleinern.
 video_schaetzen() {   # video_schaetzen <profil> <ziel_hoehe> -> "belegt danach minuten"
@@ -1075,12 +1193,13 @@ befehl_video_scan() {
   fi
 
   : > "$VIDEOLISTE.tmp"
+  fortschritt_start
   local entpackordner="$ARBEIT/video_tmp"
   rm -rf "$entpackordner"; mkdir -p "$entpackordner"
   local i=0 messfehler=0
   while IFS= read -r pfad; do
     i=$((i+1))
-    [ -t 1 ] && printf '\r  vermesse %d/%d …' "$i" "$gefunden"
+    fortschritt "$i" "$gefunden" "Videos vermessen"
     local messpfad="$pfad" verpackt="nein" temp=""
     case "$pfad" in
       *.zip)
@@ -1111,7 +1230,7 @@ befehl_video_scan() {
     [ "$verpackt" = "ja" ] && rm -rf "$entpackordner"
   done < "$tmp"
   rm -rf "$entpackordner"
-  [ -t 1 ] && printf '\r%*s\r' 40 ""
+  fortschritt_ende
   [ "$messfehler" -gt 0 ] && warn "$messfehler Dateien liessen sich nicht vermessen"
 
   # bpp und Urteil ergaenzen
@@ -1210,7 +1329,12 @@ video_bericht() {
 # Reihenfolge nach Kosten: erst das Billige, das die groben Fehler faengt.
 # Gemessen an 4K60: Dekodieren laeuft mit 4,5x Echtzeit, Kodieren mit 0,9x --
 # die Pruefung kostet also rund ein Fuenftel der Kodierzeit.
-VIDEO_SSIM_MIN="0.90"
+# Untergrenze fuer die Bildaehnlichkeit. Gemessene Werte echter Kodierungen
+# lagen zwischen 0,93 (viel Bewegung) und 0,99 (ruhige Aufnahmen); eine
+# absichtlich zerstoerte Fassung kam auf 0,87. Der Abstand ist also knapp.
+# Lieber einmal zu viel ablehnen -- das Original bleibt dabei unangetastet.
+# Ueber die Umgebungsvariable FEGEFEUER_SSIM_MIN anpassbar.
+VIDEO_SSIM_MIN="${FEGEFEUER_SSIM_MIN:-0.90}"
 
 video_pruefen() {   # video_pruefen <neu> <original> -> SSIM oder Grund, 0 = gut
   local neu="$1" alt="$2"
@@ -1244,14 +1368,32 @@ video_pruefen() {   # video_pruefen <neu> <original> -> SSIM oder Grund, 0 = gut
     local aw="${masse_alt%%,*}" ah="${masse_alt##*,}"
     lavfi="[0:v]scale=${aw}:${ah}:flags=bicubic[hoch];[hoch][1:v]ssim"
   fi
-  local ausgabe wert
-  ausgabe="$(ffmpeg -hide_banner -nostats -xerror -i "$neu" -i "$alt" \
-               -lavfi "$lavfi" -f null - 2>&1)"
-  if [ $? -ne 0 ]; then echo "Datei laesst sich nicht fehlerfrei durchspielen"; return 1; fi
+  local ausgabe wert meldedatei="$ARBEIT/ssim_fortschritt.txt"
+  : > "$meldedatei"
+  ffmpeg -hide_banner -nostats -xerror -progress "$meldedatei" -i "$neu" -i "$alt" \
+    -lavfi "$lavfi" -f null - > "$ARBEIT/ssim_ausgabe.txt" 2>&1 &
+  local ff=$!
+  local gesamt_ms us
+  gesamt_ms="$(LC_ALL=C awk -v d="$d_alt" 'BEGIN{ printf "%d", d * 1000 }')"
+  fortschritt_start
+  while kill -0 "$ff" 2>/dev/null; do
+    us="$(grep '^out_time_us=' "$meldedatei" 2>/dev/null | tail -1 | cut -d= -f2)"
+    case "$us" in
+      ''|*[!0-9]*) ;;
+      *) fortschritt "$((us / 1000))" "$gesamt_ms" "prüfe Bild und Ton";;
+    esac
+    sleep 1
+  done
+  wait "$ff"
+  local rc=$?
+  fortschritt_ende
+  ausgabe="$(cat "$ARBEIT/ssim_ausgabe.txt" 2>/dev/null)"
+  rm -f "$meldedatei" "$ARBEIT/ssim_ausgabe.txt"
+  if [ "$rc" -ne 0 ]; then echo "Datei laesst sich nicht fehlerfrei durchspielen"; return 1; fi
   wert="$(printf '%s' "$ausgabe" | grep -oE "All:[0-9.]+" | tail -1 | cut -d: -f2)"
   [ -n "$wert" ] || { echo "SSIM liess sich nicht messen"; return 1; }
   if LC_ALL=C awk -v w="$wert" -v m="$VIDEO_SSIM_MIN" 'BEGIN{ exit !(w < m) }'; then
-    echo "Bildqualität zu weit weg (SSIM $(zahl "$wert" 3))"; return 1
+    echo "Bildqualität zu weit weg (SSIM $(zahl "$wert" 3), verlangt $(zahl "$VIDEO_SSIM_MIN" 2)) — mit FEGEFEUER_SSIM_MIN anpassbar"; return 1
   fi
 
   # Groesser als vorher waere sinnlos. Hier zaehlt die logische Groesse:
@@ -1458,7 +1600,6 @@ befehl_video_run() {
 
     local neu="$tmpdir/neu.mp4"
     rm -f "$neu"
-    printf '  %skodiere …%s\n' "$grau" "$aus"
     local start; start="$(date +%s)"
     local -a skalierung=()
     if [ "$zielhoehe" -gt 0 ]; then
@@ -1467,22 +1608,22 @@ befehl_video_run() {
     fi
     # -map 0:v:0 -map 0:a? nimmt alle Tonspuren mit. Ohne -map waehlt ffmpeg
     # nur eine aus, und 16 der Testdateien hatten zwei.
-    if ! ffmpeg -hide_banner -nostats -loglevel error -i "$quelle" \
+    local dauer_s; dauer_s="$(printf '%s' "$zeile" | cut -f8)"
+    if ! video_ffmpeg "$dauer_s" "kodiere" -i "$quelle" \
          -map 0:v:0 -map "0:a?" \
-         "${skalierung[@]+"${skalierung[@]}"}" "${enc[@]}" -c:a copy -movflags +faststart "$neu" -y 2>/dev/null; then
+         "${skalierung[@]+"${skalierung[@]}"}" "${enc[@]}" -c:a copy -movflags +faststart "$neu"; then
       # Manche Kameras legen Ton ab, den ein MP4 nicht aufnimmt (etwa PCM).
       # Dann neu kodieren statt aufzugeben.
       printf '  %sTon lässt sich nicht übernehmen, kodiere ihn neu …%s\n' "$grau" "$aus"
-      if ! ffmpeg -hide_banner -nostats -loglevel error -i "$quelle" \
+      if ! video_ffmpeg "$dauer_s" "kodiere (Ton neu)" -i "$quelle" \
            -map 0:v:0 -map "0:a?" \
-           "${skalierung[@]+"${skalierung[@]}"}" "${enc[@]}" -c:a aac -b:a 192k -movflags +faststart "$neu" -y 2>/dev/null; then
+           "${skalierung[@]+"${skalierung[@]}"}" "${enc[@]}" -c:a aac -b:a 192k -movflags +faststart "$neu"; then
         printf '  %s✗%s Kodieren fehlgeschlagen\n' "$rot" "$aus"
         misslungen=$((misslungen+1)); rm -f "$neu"; rm -rf "$tmpdir/aus"; continue
       fi
     fi
     local dauer_s=$(( $(date +%s) - start ))
 
-    printf '  %sprüfe …%s\n' "$grau" "$aus"
     local grund
     if ! grund="$(video_pruefen "$neu" "$quelle")"; then
       printf '  %s✗%s %s — Original bleibt unangetastet\n' "$rot" "$aus" "$grund"
