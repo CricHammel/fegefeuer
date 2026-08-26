@@ -162,12 +162,54 @@ ausführen.
 Die lohnendsten Fäden sind die, an denen ein kleines Paket ein großes mitzieht:
 `powershell` allein hält 669 MB `dotnet` fest.
 
+## Videos neu kodieren
+
+> Im Aufbau auf dem Branch `video-neukodierung`. Bisher gibt es nur den
+> Messteil — er fasst keine Datei an.
+
+```bash
+./fegefeuer.sh video scan [verzeichnis]
+```
+
+Videos sind ein Sonderfall und deshalb ein eigener Unterbefehl: Neukodieren
+*verschiebt* nichts, es **erzeugt eine neue, verlustbehaftete Datei**. Ein `go`
+in `kandidaten.tsv` bedeutet immer nur „verschieben"; diese Bedeutung soll es
+behalten.
+
+Entschieden wird über **bpp** — Datenmenge je Bildpunkt und Bild, also
+Bitrate geteilt durch Auflösung mal Bildrate. Die Kennzahl ist über
+Auflösungen hinweg vergleichbar: ein 720p-Video mit 10 Mbit/s ist
+verschwenderischer als ein 4K-Video mit 83, weil es viel weniger Bildpunkte zu
+beschreiben hat. Ab 0,10 bpp lohnt sich ein Eingriff, bei bereits sparsamen
+Codecs (HEVC, AV1, VP9) erst ab 0,15.
+
+Drei Fälle bleiben bewusst außen vor: Dateien unter der Schwelle, Dateien mit
+weniger als 50 MB zu erwartendem Gewinn, und Zeitraffer unter 5 fps — dort
+sagt bpp nichts Sinnvolles. Alle drei werden gezählt und benannt, nicht
+stillschweigend übergangen.
+
+Am Ende stehen zwei Profile mit gemessenen Zahlen, damit die Wahl zwischen
+Tempo und Ersparnis auf Daten beruht und nicht auf einer nackten `-crf`-Zahl:
+
+| Profil | Encoder | Ergebnis | Tempo |
+|---|---|---|---|
+| `schnell` | VideoToolbox q60 | ~32 % der Größe | 0,83× Echtzeit bei 4K60 |
+| `sparsam` | x265 `veryfast` crf24 | ~23 % der Größe | 0,18× Echtzeit bei 4K60 |
+
+Bei nahezu gleicher Qualität — SSIM 0,9855 gegen 0,9839, im direkten
+Bildvergleich nicht unterscheidbar.
+
+**Dieser Unterbefehl braucht `ffmpeg`** (`brew install ffmpeg`). Er ist der
+einzige Teil, der über die Bordmittel von macOS hinausgeht, und prüft das beim
+Start.
+
 ## Dateien
 
 | Datei | |
 |---|---|
 | `fegefeuer.sh` | das Skript |
 | `gruppen.awk` | Gruppierung der Library-Reste nach Programm |
+| `video-kandidaten.tsv` | vermessene Videos *(nicht im Repo)* |
 | `kandidaten.tsv` | deine Kandidaten und Entscheidungen *(nicht im Repo)* |
 | `bericht.md` | Übersicht nach jedem `scan` *(nicht im Repo)* |
 | `.arbeit/` | Hashes und Zwischenstände *(nicht im Repo)* |

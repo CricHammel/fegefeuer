@@ -886,6 +886,237 @@ befehl_gruppen() {
   info "\n  ${fett}$gz Gruppen${aus} aus $ez Einträgen"
 }
 
+# ---------- video ----------
+# Neukodieren ist etwas anderes als Verschieben: es erzeugt eine neue,
+# verlustbehaftete Datei. Darum ein eigener Unterbefehl mit eigener Liste
+# und eigener Pruefung -- und nicht als weitere Kategorie in kandidaten.tsv,
+# wo "go" bisher immer nur "verschieben" bedeutet hat.
+
+VIDEOLISTE="$BASIS/video-kandidaten.tsv"
+
+# Messwerte von einem Apple M2, Quelle 4K60 H.264 mit 0,168 bpp:
+#   schnell  VideoToolbox q60    -> 0,055 bpp Ausgabe, rund 413 Mpx/s
+#   sparsam  x265 veryfast crf24 -> 0,040 bpp Ausgabe, rund  90 Mpx/s
+VIDEO_BPP_SCHNELL="0.055"
+VIDEO_BPP_SPARSAM="0.040"
+VIDEO_TEMPO_SCHNELL="413000000"
+VIDEO_TEMPO_SPARSAM="90000000"
+# Ab so viel Datenmenge je Bildpunkt lohnt das Neukodieren.
+VIDEO_SCHWELLE="0.10"
+# Bereits sparsame Codecs brauchen mehr, bevor sich ein Eingriff lohnt.
+VIDEO_SCHWELLE_MODERN="0.15"
+# Unter diesem Gewinn lohnt der Aufwand nicht, egal wie ueppig kodiert.
+VIDEO_MINDESTGEWINN_KB="51200"
+
+video_werkzeuge_pruefen() {
+  local fehlt=""
+  command -v ffmpeg  >/dev/null 2>&1 || fehlt="$fehlt ffmpeg"
+  command -v ffprobe >/dev/null 2>&1 || fehlt="$fehlt ffprobe"
+  if [ -n "$fehlt" ]; then
+    fehler "Für Videos fehlt:$fehlt"
+    info "${grau}Der übrige Teil von fegefeuer kommt ohne Zusatzsoftware aus,"
+    info "das Neukodieren nicht. Zu installieren mit:${aus}"
+    info "  ${fett}brew install ffmpeg${aus}"
+    return 1
+  fi
+  return 0
+}
+
+# Zahlen mit deutschem Komma ausgeben, gerechnet wird mit Punkt
+zahl() { LC_ALL=C awk -v w="$1" -v n="${2:-1}" 'BEGIN{s=sprintf("%.*f", n, w); sub(/\./, ",", s); print s}'; }
+
+# "codec breite hoehe fps dauer" oder nichts
+video_vermessen() {
+  LC_ALL=C ffprobe -v error -select_streams v:0 \
+    -show_entries stream=codec_name,width,height,r_frame_rate \
+    -show_entries format=duration -of default=nw=1 "$1" 2>/dev/null \
+  | LC_ALL=C awk -F= '
+      /^codec_name/ { c=$2 }
+      /^width/      { w=$2 }
+      /^height/     { h=$2 }
+      /^r_frame_rate/ { split($2,a,"/"); f=(a[2]>0)? a[1]/a[2] : 0 }
+      /^duration/   { d=$2 }
+      END { if (c!="" && w>0 && h>0 && f>0 && d>0) printf "%s %d %d %.4f %.3f\n", c, w, h, f, d }'
+}
+
+freier_platz_kb() { df -k "${1:-$HOME}" 2>/dev/null | tail -1 | awk '{print $4}'; }
+
+befehl_video_scan() {
+  video_werkzeuge_pruefen || return 1
+  local wurzel="${1:-$HOME}"
+  [ -d "$wurzel" ] || { fehler "Kein Verzeichnis: $wurzel"; return 1; }
+
+  titel "Videos suchen unter ${wurzel/#$HOME/$TILDE}"
+  local tmp="$ARBEIT/video_fund.txt"
+  find "$wurzel" -type f \( \
+       -iname "*.mp4" -o -iname "*.mov" -o -iname "*.m4v" -o -iname "*.avi" \
+    -o -iname "*.mkv" -o -iname "*.wmv" -o -iname "*.mpg" -o -iname "*.mpeg" \
+    -o -iname "*.mp4.zip" -o -iname "*.mov.zip" -o -iname "*.m4v.zip" \) \
+    -size +20M \
+    ! -path "*/Library/*" ! -path "*/.fegefeuer/*" ! -path "*/node_modules/*" \
+    ! -path "*/.Trash/*" ! -path "*.photoslibrary/*" ! -path "*OneDrive*" \
+    -print 2>/dev/null | sort > "$tmp"
+  local gefunden; gefunden="$(wc -l < "$tmp" | tr -d ' ')"
+  [ "$gefunden" -eq 0 ] && { info "  Keine Videos über 20 MB gefunden."; return 0; }
+  info "  $gefunden Dateien über 20 MB"
+
+  local entpackbedarf=0 zips=0 pfad
+  while IFS= read -r pfad; do
+    case "$pfad" in
+      *.zip) zips=$((zips+1))
+             local roh; roh="$(LC_ALL=C unzip -l "$pfad" 2>/dev/null | tail -1 | awk '{print $1}')"
+             [ -n "$roh" ] && [ "$roh" -gt "$entpackbedarf" ] 2>/dev/null && entpackbedarf="$roh";;
+    esac
+  done < "$tmp"
+  if [ "$zips" -gt 0 ]; then
+    info "  davon $zips in einem ZIP — die müssen zum Messen kurz entpackt werden"
+    local frei; frei="$(freier_platz_kb "$ARBEIT")"
+    local noetig=$(( entpackbedarf / 1024 + 500000 ))
+    if [ "$frei" -lt "$noetig" ]; then
+      fehler "Zu wenig Platz zum Entpacken: $(mb "$frei") frei, $(mb "$noetig") nötig."
+      return 1
+    fi
+  fi
+
+  : > "$VIDEOLISTE.tmp"
+  local entpackordner="$ARBEIT/video_tmp"
+  rm -rf "$entpackordner"; mkdir -p "$entpackordner"
+  local i=0 messfehler=0
+  while IFS= read -r pfad; do
+    i=$((i+1))
+    [ -t 1 ] && printf '\r  vermesse %d/%d …' "$i" "$gefunden"
+    local messpfad="$pfad" verpackt="nein" temp=""
+    case "$pfad" in
+      *.zip)
+        verpackt="ja"
+        rm -rf "$entpackordner"; mkdir -p "$entpackordner"
+        unzip -o -q "$pfad" -d "$entpackordner" 2>/dev/null
+        temp="$(find "$entpackordner" -type f -size +1M 2>/dev/null | head -1)"
+        [ -n "$temp" ] || { messfehler=$((messfehler+1)); continue; }
+        messpfad="$temp";;
+    esac
+    local daten; daten="$(video_vermessen "$messpfad")"
+    if [ -z "$daten" ]; then
+      messfehler=$((messfehler+1))
+      [ "$verpackt" = "ja" ] && rm -rf "$entpackordner"
+      continue
+    fi
+    local kb; kb="$(du -sk "$pfad" 2>/dev/null | cut -f1)"
+    local rohkb; rohkb="$(du -sk "$messpfad" 2>/dev/null | cut -f1)"
+    # Felder einzeln setzen -- ein tr ueber die ganze Zeile wuerde Dateinamen
+    # mit Leerzeichen in lauter Spalten zerlegen.
+    local codec breite hoehe fps dauer
+    # IFS ausdruecklich setzen: das IFS= der aeusseren Schleife wirkt hier
+    # sonst weiter, und read stopft alles in die erste Variable.
+    IFS=' ' read -r codec breite hoehe fps dauer <<< "$daten"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+      "neu" "$pfad" "$verpackt" "$codec" "$breite" "$hoehe" "$fps" "$dauer" "$kb" "$rohkb" \
+      >> "$VIDEOLISTE.tmp"
+    [ "$verpackt" = "ja" ] && rm -rf "$entpackordner"
+  done < "$tmp"
+  rm -rf "$entpackordner"
+  [ -t 1 ] && printf '\r%*s\r' 40 ""
+  [ "$messfehler" -gt 0 ] && warn "$messfehler Dateien liessen sich nicht vermessen"
+
+  # bpp und Urteil ergaenzen
+  LC_ALL=C awk -F'\t' -v OFS='\t' \
+      -v s="$VIDEO_SCHWELLE" -v sm="$VIDEO_SCHWELLE_MODERN" \
+      -v bs="$VIDEO_BPP_SCHNELL" -v bp="$VIDEO_BPP_SPARSAM" \
+      -v mg="$VIDEO_MINDESTGEWINN_KB" '
+    {
+      status=$1; pfad=$2; verpackt=$3; codec=$4; w=$5; h=$6; fps=$7; dauer=$8; kb=$9; rohkb=$10
+      pxs = w * h * fps
+      if (pxs <= 0 || dauer <= 0) next
+      bitrate = rohkb * 1024 * 8 / dauer
+      bpp = (pxs>0) ? bitrate / pxs : 0
+      modern = (codec=="hevc" || codec=="av1" || codec=="vp9")
+      schwelle = modern ? sm : s
+      neu_schnell = pxs * bs * dauer / 8 / 1024
+      neu_sparsam = pxs * bp * dauer / 8 / 1024
+      if (neu_schnell > rohkb) neu_schnell = rohkb
+      if (neu_sparsam > rohkb) neu_sparsam = rohkb
+      # Gewinn gegen den tatsaechlichen Platzbedarf rechnen: bei einem ZIP
+      # belegt die Platte die gepackte Groesse, nicht die entpackte.
+      gewinn = kb - neu_sparsam
+      if (fps < 5)              urteil = "zeitraffer"
+      else if (bpp <= schwelle) urteil = "sparsam"
+      else if (gewinn < mg)     urteil = "geringfuegig"
+      else                      urteil = "lohnt"
+      print status, pfad, verpackt, codec, w, h, fps, dauer, kb, rohkb, bpp, urteil, int(neu_schnell), int(neu_sparsam)
+    }' "$VIDEOLISTE.tmp" > "$VIDEOLISTE"
+  rm -f "$VIDEOLISTE.tmp"
+
+  video_bericht
+}
+
+video_bericht() {
+  [ -s "$VIDEOLISTE" ] || { info "Keine vermessenen Videos."; return 0; }
+
+  titel "Was sich lohnt"
+  LC_ALL=C awk -F'\t' -v h="$HOME" '
+    function komma(w, n,   t) { t = sprintf("%.*f", n, w); sub(/\./, ",", t); return t }
+    $12=="lohnt" {
+      p=$2; sub(h, "~", p)
+      n=split(p, teile, "/"); kurz=teile[n]
+      if (length(kurz)>36) kurz=substr(kurz,1,35) "…"
+      gewinn = ($9 - $14) / 1048576
+      printf "%.6f\t  %-36s %5dx%-4d %3.0f fps %7s min %7s bpp %7s GB → %7s GB\n", \
+             gewinn, kurz, $5, $6, $7, komma($8/60,1), komma($11,3), \
+             komma($9/1048576,2), komma($14/1048576,2)
+    }' "$VIDEOLISTE" \
+  | sort -t$'\t' -k1,1nr | cut -f2- > "$ARBEIT/video_liste.txt"
+
+  local zeilen; zeilen="$(wc -l < "$ARBEIT/video_liste.txt" | tr -d ' ')"
+  head -15 "$ARBEIT/video_liste.txt"
+  if [ "$zeilen" -gt 15 ]; then
+    local rest_gb
+    rest_gb="$(LC_ALL=C awk -F'\t' '$12=="lohnt"{g[++n]=($9-$14)/1048576}
+      END{ m=n; for(i=1;i<=n;i++) for(j=i+1;j<=n;j++) if(g[j]>g[i]){t=g[i];g[i]=g[j];g[j]=t}
+           for(i=16;i<=n;i++) s+=g[i]; t=sprintf("%.2f", s); sub(/\./,",",t); print t }' "$VIDEOLISTE")"
+    info "  ${grau}… und $((zeilen - 15)) weitere, zusammen $rest_gb GB Ersparnis${aus}"
+  fi
+
+  # Randfaelle sichtbar machen, statt sie stillschweigend zu schlucken
+  local n_ger n_zeit n_spar
+  n_ger="$(awk -F'\t' '$12=="geringfuegig"' "$VIDEOLISTE" | wc -l | tr -d ' ')"
+  n_zeit="$(awk -F'\t' '$12=="zeitraffer"' "$VIDEOLISTE" | wc -l | tr -d ' ')"
+  n_spar="$(awk -F'\t' '$12=="sparsam"' "$VIDEOLISTE" | wc -l | tr -d ' ')"
+  echo
+  [ "$n_spar" -gt 0 ] && info "  ${grau}$n_spar Dateien sind bereits sparsam kodiert — unangetastet.${aus}"
+  [ "$n_ger" -gt 0 ]  && info "  ${grau}$n_ger Dateien wären zwar üppig kodiert, brächten aber je unter $(mb "$VIDEO_MINDESTGEWINN_KB") — nicht vorgeschlagen.${aus}"
+  [ "$n_zeit" -gt 0 ] && info "  ${grau}$n_zeit Zeitraffer (unter 5 fps) — dort ist die Kennzahl nicht aussagekräftig, bitte selbst ansehen.${aus}"
+
+  LC_ALL=C awk -F'\t' -v ts="$VIDEO_TEMPO_SCHNELL" -v tp="$VIDEO_TEMPO_SPARSAM" '
+    { gesamt_kb += $9
+      if ($12=="lohnt") {
+        n++; belegt += $9; schnell += $13; sparsam += $14
+        pxs = $5*$6*$7; zeit_s += pxs*$8/ts; zeit_p += pxs*$8/tp
+      } }
+    END { printf "%d\t%.2f\t%.2f\t%.2f\t%.1f\t%.1f\t%.2f\n", \
+            n, belegt/1048576, schnell/1048576, sparsam/1048576, zeit_s/60, zeit_p/60, gesamt_kb/1048576 }' \
+    "$VIDEOLISTE" | while IFS=$'\t' read -r n belegt sch spa zs zp ges; do
+      echo
+      info "  ${fett}$n Dateien vorgeschlagen${aus} — $(zahl "$belegt" 2) GB von $(zahl "$ges" 2) GB Videomaterial"
+      echo
+      printf "  %-10s %-22s %11s %11s %12s\n" "Profil" "Encoder" "danach" "gespart" "Rechenzeit"
+      printf "  %-10s %-22s %8s GB %8s GB %9s min\n" "schnell" "VideoToolbox q60" \
+        "$(zahl "$sch" 2)" "$(LC_ALL=C awk -v a="$belegt" -v b="$sch" 'BEGIN{t=sprintf("%.2f",a-b); sub(/\./,",",t); print t}')" "$(zahl "$zs" 1)"
+      printf "  %-10s %-22s %8s GB %8s GB %9s min\n" "sparsam" "x265 veryfast crf24" \
+        "$(zahl "$spa" 2)" "$(LC_ALL=C awk -v a="$belegt" -v b="$spa" 'BEGIN{t=sprintf("%.2f",a-b); sub(/\./,",",t); print t}')" "$(zahl "$zp" 1)"
+    done
+  echo
+  info "  ${grau}Geschätzt aus Messungen an einer 4K60-Datei; ruhige Aufnahmen werden kleiner,"
+  info "  bewegte grösser. Es wurde noch nichts angefasst.${aus}"
+  info "\n  Liste: ${VIDEOLISTE/#$HOME/$TILDE}"
+}
+
+befehl_video() {
+  case "${1:-hilfe}" in
+    scan) shift; befehl_video_scan "${1:-$HOME}";;
+    *) info "Bisher gibt es nur: ${fett}$0 video scan [verzeichnis]${aus}";;
+  esac
+}
+
 # ---------- Hilfe ----------
 befehl_hilfe() {
   cat <<HILFE
@@ -899,6 +1130,8 @@ ${fett}fegefeuer.sh${aus} — Festplatte aufräumen ohne Reue
   ${fett}gruppen${aus} [kategorie] Offene Gruppen anzeigen, größte zuerst
   ${fett}apply${aus}             Entschiedenes in die Quarantäne verschieben
   ${fett}brew${aus}              Homebrew durchleuchten, Deinstallations-Vorschlag erzeugen
+  ${fett}video scan${aus} [pfad]  Videos vermessen und zeigen, welche zu üppig kodiert sind
+                    ${grau}(braucht ffmpeg; fasst nichts an)${aus}
   ${fett}list${aus}              Quarantäne anzeigen
   ${fett}pruefen${aus}           Zeigen, was sich von selbst wieder aufgebaut hat
   ${fett}restore${aus} <stapel>  Einen Stapel zurückholen
@@ -938,6 +1171,7 @@ case "${1:-hilfe}" in
   zeigen) befehl_zeigen "${2:-}";;
   gruppen) befehl_gruppen "${2:-}";;
   brew) befehl_brew;;
+  video) shift; befehl_video "$@";;
   purge) shift; befehl_purge "$@";;
   pruefen) befehl_pruefen;;
   *) befehl_hilfe;;
