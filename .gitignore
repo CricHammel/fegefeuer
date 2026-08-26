@@ -2,6 +2,8 @@
 # und Programmreste des jeweiligen Rechners und gehören niemandem sonst.
 kandidaten.tsv
 kandidaten.tsv.*
+video-kandidaten.tsv
+video-kandidaten.tsv.*
 bericht.md
 brew-vorschlag.sh
 

@@ -162,12 +162,134 @@ ausführen.
 Die lohnendsten Fäden sind die, an denen ein kleines Paket ein großes mitzieht:
 `powershell` allein hält 669 MB `dotnet` fest.
 
+## Videos neu kodieren
+
+> Auf dem Branch `video-neukodierung`.
+
+```bash
+./fegefeuer.sh video scan [verzeichnis]   # vermessen, nichts anfassen
+./fegefeuer.sh video review               # auswählen
+./fegefeuer.sh video run                  # kodieren, prüfen, Original sichern
+```
+
+`video run` ohne `--profil` fragt nach und zeigt dabei die Zahlen für **deine**
+gerade ausgewählten Dateien, nicht allgemeine Richtwerte:
+
+```
+Womit kodieren?  Zahlen für deine 17 ausgewählten Dateien:
+
+  1) schnell   VideoToolbox q60       9,71 GB → 2,62 GB    7,09 GB gespart   ~17 min
+     Hardware-Chip des Macs, rund fünfmal schneller
+  2) sparsam   x265 veryfast crf24    9,71 GB → 1,90 GB    7,81 GB gespart   ~76 min
+     rechnet auf allen Kernen, Ergebnis rund ein Viertel kleiner
+```
+
+Für Skripte nimmt `--profil schnell` oder `--profil sparsam` die Frage vorweg.
+Einen stillen Standardwert gibt es bewusst nicht — wer nichts angibt und
+nichts eingeben kann, bekommt einen Fehler statt einer stillschweigend
+getroffenen Entscheidung.
+
+Videos sind ein Sonderfall und deshalb ein eigener Unterbefehl: Neukodieren
+*verschiebt* nichts, es **erzeugt eine neue, verlustbehaftete Datei**. Ein `go`
+in `kandidaten.tsv` bedeutet immer nur „verschieben"; diese Bedeutung soll es
+behalten.
+
+Entschieden wird über **bpp** — Datenmenge je Bildpunkt und Bild, also
+Bitrate geteilt durch Auflösung mal Bildrate. Die Kennzahl ist über
+Auflösungen hinweg vergleichbar: ein 720p-Video mit 10 Mbit/s ist
+verschwenderischer als ein 4K-Video mit 83, weil es viel weniger Bildpunkte zu
+beschreiben hat. Ab 0,10 bpp lohnt sich ein Eingriff, bei bereits sparsamen
+Codecs (HEVC, AV1, VP9) erst ab 0,15.
+
+Drei Fälle bleiben bewusst außen vor: Dateien unter der Schwelle, Dateien mit
+weniger als 50 MB zu erwartendem Gewinn, und Zeitraffer unter 5 fps — dort
+sagt bpp nichts Sinnvolles. Alle drei werden gezählt und benannt, nicht
+stillschweigend übergangen.
+
+Vier Profile, alle an derselben 4K60-Stelle gemessen:
+
+| Profil | Encoder | Ergebnis | Zeit | SSIM |
+|---|---|---:|---:|---:|
+| `schnell` | VideoToolbox q60 | 29 % | 1× | 0,986 |
+| `av1` | SVT-AV1 crf32 | 27 % | 5× | **0,989** |
+| `sparsam` | x265 `veryfast` crf24 | 20 % | 6× | 0,985 |
+| `klein` | x265 `veryfast` crf28 | **13 %** | 5× | 0,979 |
+
+Die Qualität liegt bei allen vier dicht beieinander; die Wahl ist keine
+zwischen gut und schlecht, sondern zwischen Zeit und Platz.
+
+`av1` ist der stärkste Kompromiss aus Qualität und Größe und dabei schneller
+als x265 — der M2 dekodiert AV1 allerdings **nicht** in Hardware. Abspielen
+kostet dadurch mehr Akku (2,8× statt 3,7× Echtzeit), und ältere Geräte spielen
+es womöglich gar nicht ab. Die Auswahl weist darauf hin.
+
+### Zusätzlich verkleinern
+
+```bash
+./fegefeuer.sh video run --profil sparsam --auf 1080p
+```
+
+Das ist der größte Hebel überhaupt: 4K auf 1080p bringt **9 %** der
+Ausgangsgröße statt 20 %, bei SSIM 0,975 gegen das 4K-Original. Videos, die
+schon kleiner sind, werden nicht hochskaliert.
+
+Es ist bewusst kein Profil, sondern eine eigene Option. Ein Profil wählt, wie
+sorgfältig kodiert wird — die Auflösung zu verringern wirft dagegen
+Bildinformation weg, die nie wiederkommt. Das soll man ausdrücklich tun
+müssen. Die Prüfung skaliert für den Vergleich wieder hoch, misst also, was
+tatsächlich verloren ging.
+
+### Was sich nicht lohnt
+
+Zwei naheliegende Ideen habe ich vermessen und verworfen:
+
+- **10 Bit**: 2,2-fache Rechenzeit für 0,7 % kleinere Dateien.
+- **Bildrate halbieren**: nur 13 % Gewinn. Bei halber Bildrate liegen
+  aufeinanderfolgende Bilder weiter auseinander, jedes einzelne kostet dadurch
+  mehr — der Effekt frisst die Ersparnis fast auf. Für so wenig die flüssige
+  Bewegung aufzugeben lohnt nicht.
+- **Langsamere x265-Presets**: `medium` braucht doppelt so lange wie
+  `veryfast` bei praktisch gleichem Ergebnis.
+
+### Die Prüfung
+
+Kodiert wird in eine Nebendatei. Erst wenn sie **alle** Prüfungen besteht,
+wandert das Original ins Fegefeuer und die neue Fassung nimmt seinen Platz
+ein. Fällt eine durch, wird die neue Datei verworfen und das Original bleibt
+unberührt.
+
+| Prüfung | fängt ab |
+|---|---|
+| Laufzeit auf 0,5 s genau | abgeschnittene Aufnahmen |
+| Tonspur vorhanden | stumme Filme, die erst Monate später auffallen |
+| vollständige SSIM-Messung | Abbrüche, Beschädigungen, grobe Fehlkodierungen |
+| kleiner als vorher | Kodierungen, die nichts bringen |
+
+Die SSIM-Messung läuft über die **ganze** Datei, nicht über Stichproben. Ein
+erster Entwurf verglich drei Ausschnitte — an derselben Stelle ergab das
+0,838 statt 0,948, weil `-ss` vor `-i` bei unterschiedlichen Keyframe-Rastern
+nicht dasselbe Bild trifft. Gute Kodierungen wären so verworfen worden. Der
+vollständige Durchlauf dekodiert beide Dateien ohnehin und ersetzt damit
+zugleich die Prüflesung; er kostet rund die Hälfte der Kodierzeit beim
+schnellen Profil und ein Zehntel beim sparsamen.
+
+Das Original landet mit einem Vermerk im Fegefeuer, der es von verschobenen
+Dateien unterscheidet. Das ist wichtig: Am Originalort liegt danach die neue
+Fassung, und ohne diesen Vermerk würde `pruefen` melden, die Datei sei „von
+selbst zurückgekehrt" und die Quarantänekopie entbehrlich — worauf
+`purge --wieder-da` ein unersetzliches Kameraoriginal gelöscht hätte.
+
+**Dieser Unterbefehl braucht `ffmpeg`** (`brew install ffmpeg`). Er ist der
+einzige Teil, der über die Bordmittel von macOS hinausgeht, und prüft das beim
+Start.
+
 ## Dateien
 
 | Datei | |
 |---|---|
 | `fegefeuer.sh` | das Skript |
 | `gruppen.awk` | Gruppierung der Library-Reste nach Programm |
+| `video-kandidaten.tsv` | vermessene Videos *(nicht im Repo)* |
 | `kandidaten.tsv` | deine Kandidaten und Entscheidungen *(nicht im Repo)* |
 | `bericht.md` | Übersicht nach jedem `scan` *(nicht im Repo)* |
 | `.arbeit/` | Hashes und Zwischenstände *(nicht im Repo)* |
