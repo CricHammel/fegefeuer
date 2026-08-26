@@ -206,17 +206,50 @@ weniger als 50 MB zu erwartendem Gewinn, und Zeitraffer unter 5 fps — dort
 sagt bpp nichts Sinnvolles. Alle drei werden gezählt und benannt, nicht
 stillschweigend übergangen.
 
-Die beiden Profile, gemessen an 4K60-Material:
+Vier Profile, alle an derselben 4K60-Stelle gemessen:
 
-| Profil | Encoder | Ergebnis | Tempo |
-|---|---|---|---|
-| `schnell` | VideoToolbox q60 | ~32 % der Größe | 0,83× Echtzeit |
-| `sparsam` | x265 `veryfast` crf24 | ~23 % der Größe | 0,18× Echtzeit |
+| Profil | Encoder | Ergebnis | Zeit | SSIM |
+|---|---|---:|---:|---:|
+| `schnell` | VideoToolbox q60 | 29 % | 1× | 0,986 |
+| `av1` | SVT-AV1 crf32 | 27 % | 5× | **0,989** |
+| `sparsam` | x265 `veryfast` crf24 | 20 % | 6× | 0,985 |
+| `klein` | x265 `veryfast` crf28 | **13 %** | 5× | 0,979 |
 
-Bei nahezu gleicher Qualität — SSIM 0,9855 gegen 0,9839, im direkten
-Bildvergleich nicht unterscheidbar. Die Wahl ist also keine zwischen gut und
-schlecht, sondern zwischen Zeit und Platz. `./fegefeuer.sh video` listet die
-Profile jederzeit auf.
+Die Qualität liegt bei allen vier dicht beieinander; die Wahl ist keine
+zwischen gut und schlecht, sondern zwischen Zeit und Platz.
+
+`av1` ist der stärkste Kompromiss aus Qualität und Größe und dabei schneller
+als x265 — der M2 dekodiert AV1 allerdings **nicht** in Hardware. Abspielen
+kostet dadurch mehr Akku (2,8× statt 3,7× Echtzeit), und ältere Geräte spielen
+es womöglich gar nicht ab. Die Auswahl weist darauf hin.
+
+### Zusätzlich verkleinern
+
+```bash
+./fegefeuer.sh video run --profil sparsam --auf 1080p
+```
+
+Das ist der größte Hebel überhaupt: 4K auf 1080p bringt **9 %** der
+Ausgangsgröße statt 20 %, bei SSIM 0,975 gegen das 4K-Original. Videos, die
+schon kleiner sind, werden nicht hochskaliert.
+
+Es ist bewusst kein Profil, sondern eine eigene Option. Ein Profil wählt, wie
+sorgfältig kodiert wird — die Auflösung zu verringern wirft dagegen
+Bildinformation weg, die nie wiederkommt. Das soll man ausdrücklich tun
+müssen. Die Prüfung skaliert für den Vergleich wieder hoch, misst also, was
+tatsächlich verloren ging.
+
+### Was sich nicht lohnt
+
+Zwei naheliegende Ideen habe ich vermessen und verworfen:
+
+- **10 Bit**: 2,2-fache Rechenzeit für 0,7 % kleinere Dateien.
+- **Bildrate halbieren**: nur 13 % Gewinn. Bei halber Bildrate liegen
+  aufeinanderfolgende Bilder weiter auseinander, jedes einzelne kostet dadurch
+  mehr — der Effekt frisst die Ersparnis fast auf. Für so wenig die flüssige
+  Bewegung aufzugeben lohnt nicht.
+- **Langsamere x265-Presets**: `medium` braucht doppelt so lange wie
+  `veryfast` bei praktisch gleichem Ergebnis.
 
 ### Die Prüfung
 

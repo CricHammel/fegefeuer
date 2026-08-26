@@ -937,25 +937,59 @@ VIDEO_SCHWELLE_MODERN="0.15"
 # Unter diesem Gewinn lohnt der Aufwand nicht, egal wie ueppig kodiert.
 VIDEO_MINDESTGEWINN_KB="51200"
 
-# Ein Profil an genau einer Stelle beschrieben: Name, Encoder-Parameter,
-# erwartete Ausgabe-bpp, Tempo in Pixeln je Sekunde, Merksatz.
+# Alle Profile an genau einer Stelle. Die Zahlen stammen aus Messungen an
+# einer 4K60-Datei auf einem Apple M2:
+#   Feld 1  Encoder, wie er in der Auswahl erscheint
+#   Feld 2  Merksatz
+#   Feld 3  erwartete Ausgabe-bpp (Datenmenge je Bildpunkt und Bild)
+#   Feld 4  Tempo in Millionen Bildpunkten je Sekunde
+#   Feld 5  Warnhinweis, leer wenn keiner noetig
+video_profil_namen() { printf '%s\n' "schnell" "av1" "sparsam" "klein"; }
+
+video_profil_daten() {
+  case "$1" in
+    schnell) echo "VideoToolbox q60|Hardware-Chip des Macs, mit Abstand am schnellsten|0.0548|413|";;
+    av1)     echo "SVT-AV1 crf32|beste Bildqualität im Test, dabei schneller als x265|0.0505|87|Der M2 dekodiert AV1 nicht in Hardware: Abspielen kostet mehr Akku, und ältere Geräte oder Handys spielen es womöglich gar nicht ab.";;
+    sparsam) echo "x265 veryfast crf24|guter Mittelweg, überall abspielbar|0.0378|72|";;
+    klein)   echo "x265 veryfast crf28|kleinste Dateien, merklich weniger Reserve|0.0247|89|";;
+    *) return 1;;
+  esac
+}
+
 video_profil_encoder() {
   case "$1" in
-    schnell) printf '%s\n' "-c:v" "hevc_videotoolbox" "-q:v" "60";;
-    sparsam) printf '%s\n' "-c:v" "libx265" "-crf" "24" "-preset" "veryfast";;
+    schnell) printf '%s\n' "-c:v" "hevc_videotoolbox" "-q:v" "60" "-tag:v" "hvc1";;
+    av1)     printf '%s\n' "-c:v" "libsvtav1" "-crf" "32" "-preset" "8";;
+    sparsam) printf '%s\n' "-c:v" "libx265" "-crf" "24" "-preset" "veryfast" "-tag:v" "hvc1";;
+    klein)   printf '%s\n' "-c:v" "libx265" "-crf" "28" "-preset" "veryfast" "-tag:v" "hvc1";;
     *) return 1;;
   esac
 }
-video_profil_beschreibung() {
-  case "$1" in
-    schnell) echo "VideoToolbox q60|Hardware-Chip des Macs, rund fünfmal schneller";;
-    sparsam) echo "x265 veryfast crf24|rechnet auf allen Kernen, Ergebnis rund ein Viertel kleiner";;
-    *) return 1;;
-  esac
+
+video_profil_feld() { video_profil_daten "$1" | cut -d'|' -f"$2"; }
+
+# Schaetzt fuer alle 'go'-Eintraege der Liste: belegt, danach, Minuten.
+# ziel_h = 0 heisst Auflösung beibehalten, sonst auf diese Höhe verkleinern.
+video_schaetzen() {   # video_schaetzen <profil> <ziel_hoehe> -> "belegt danach minuten"
+  local bpp mpxs
+  bpp="$(video_profil_feld "$1" 3)"
+  mpxs="$(video_profil_feld "$1" 4)"
+  LC_ALL=C awk -F'\t' -v bpp="$bpp" -v mpxs="$mpxs" -v zh="${2:-0}" '
+    $1=="go" {
+      w=$5; h=$6; fps=$7; dauer=$8; kb=$9
+      aw=w; ah=h
+      if (zh > 0 && h > zh) { ah = zh; aw = int(w * zh / h / 2) * 2 }
+      verhaeltnis = (w*h > 0) ? (aw*ah)/(w*h) : 1
+      aus_kb = bpp * aw * ah * fps * dauer / 8 / 1024
+      if (aus_kb > kb) aus_kb = kb
+      # Zeit: gemessen bei voller Auflösung; Verkleinern spart weniger als
+      # das Pixelverhältnis vermuten lässt, weil das Dekodieren gleich bleibt.
+      voll = w * h * fps * dauer / (mpxs * 1000000)
+      sek = voll * (0.45 + 0.55 * verhaeltnis)
+      belegt += kb; danach += aus_kb; zeit += sek
+    }
+    END { printf "%d\t%d\t%.1f", belegt, danach, zeit/60 }' "$VIDEOLISTE"
 }
-# Zeilenweise, nicht durch Leerzeichen getrennt: das Skript setzt oben
-# IFS=$'\n\t', Leerzeichen trennt also keine Woerter.
-video_profil_namen() { printf '%s\n' "schnell" "sparsam"; }
 
 video_werkzeuge_pruefen() {
   local fehlt=""
@@ -1188,9 +1222,18 @@ video_pruefen() {   # video_pruefen <neu> <original> -> SSIM oder Grund, 0 = gut
   # demselben Bild -- gemessen: 0,838 statt 0,948 an derselben Stelle.
   # Der Durchlauf dekodiert beide Dateien komplett und ersetzt damit zugleich
   # die Prueflesung: bricht eine Datei ab, schlaegt er fehl.
+  # Bei verkleinerter Ausgabe muss fuer den Vergleich wieder hochskaliert
+  # werden, sonst kann der ssim-Filter die Bilder nicht uebereinanderlegen.
+  local masse_neu masse_alt lavfi="[0:v][1:v]ssim"
+  masse_neu="$(LC_ALL=C ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "$neu" 2>/dev/null)"
+  masse_alt="$(LC_ALL=C ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "$alt" 2>/dev/null)"
+  if [ -n "$masse_alt" ] && [ "$masse_neu" != "$masse_alt" ]; then
+    local aw="${masse_alt%%,*}" ah="${masse_alt##*,}"
+    lavfi="[0:v]scale=${aw}:${ah}:flags=bicubic[hoch];[hoch][1:v]ssim"
+  fi
   local ausgabe wert
   ausgabe="$(ffmpeg -hide_banner -nostats -xerror -i "$neu" -i "$alt" \
-               -lavfi "[0:v][1:v]ssim" -f null - 2>&1)"
+               -lavfi "$lavfi" -f null - 2>&1)"
   if [ $? -ne 0 ]; then echo "Datei laesst sich nicht fehlerfrei durchspielen"; return 1; fi
   wert="$(printf '%s' "$ausgabe" | grep -oE "All:[0-9.]+" | tail -1 | cut -d: -f2)"
   [ -n "$wert" ] || { echo "SSIM liess sich nicht messen"; return 1; }
@@ -1265,64 +1308,67 @@ befehl_video_review() {
 
 # Zeigt beide Profile mit den Zahlen der tatsaechlich ausgewaehlten Dateien
 # und fragt. Ergebnis in VIDEO_PROFIL.
-video_profil_waehlen() {
-  local werte
-  werte="$(LC_ALL=C awk -F'\t' -v ts="$VIDEO_TEMPO_SCHNELL" -v tp="$VIDEO_TEMPO_SPARSAM" '
-    $1=="go" { belegt+=$9; sch+=$13; spa+=$14; pxs=$5*$6*$7; zs+=pxs*$8/ts; zp+=pxs*$8/tp }
-    END { printf "%d\t%d\t%d\t%.1f\t%.1f", belegt, sch, spa, zs/60, zp/60 }' "$VIDEOLISTE")"
-  local belegt sch spa zs zp
-  IFS=$'\t' read -r belegt sch spa zs zp <<< "$werte"
+video_profil_waehlen() {   # <anzahl> <ziel_hoehe>
+  local anzahl="$1" zielhoehe="${2:-0}"
+  info "\n${fett}Womit kodieren?${aus}  ${grau}Zahlen für deine $anzahl ausgewählten Dateien"
+  [ "$zielhoehe" -gt 0 ] && info "  einschliesslich Verkleinerung auf ${zielhoehe}p"
+  printf '%s' "$aus"
+  echo
 
-  info "\n${fett}Womit kodieren?${aus}  ${grau}Zahlen für deine $1 ausgewählten Dateien:${aus}\n"
-  local i=0 name b enc merk
+  local i=0 name rumpf belegt danach minuten hinweis
   for name in $(video_profil_namen); do
     i=$((i+1))
-    b="$(video_profil_beschreibung "$name")"
-    enc="${b%%|*}"; merk="${b#*|}"
-    local danach zeit rumpf
-    if [ "$name" = "schnell" ]; then danach="$sch"; zeit="$zs"; else danach="$spa"; zeit="$zp"; fi
-    # Erst den Text bauen, dann faerben -- Farbcodes mitten in der Formatzeile
-    # bringen die Argumentzahl leicht durcheinander.
+    read -r belegt danach minuten <<< "$(video_schaetzen "$name" "$zielhoehe")"
     rumpf="$(printf '%-9s %-22s %9s → %-9s  %8s gespart   ~%s min' \
-      "$name" "$enc" "$(mb "$belegt")" "$(mb "$danach")" \
-      "$(mb $((belegt - danach)))" "$(zahl "$zeit" 0)")"
+      "$name" "$(video_profil_feld "$name" 1)" "$(mb "$belegt")" "$(mb "$danach")" \
+      "$(mb $((belegt - danach)))" "$(zahl "$minuten" 0)")"
     printf '  %s%d)%s %s\n' "$fett" "$i" "$aus" "$rumpf"
-    printf '     %s%s%s\n' "$grau" "$merk" "$aus"
+    printf '     %s%s%s\n' "$grau" "$(video_profil_feld "$name" 2)" "$aus"
+    hinweis="$(video_profil_feld "$name" 5)"
+    [ -n "$hinweis" ] && printf '     %s⚠ %s%s\n' "$gelb" "$hinweis" "$aus"
   done
-  info "\n  ${grau}Die Bildqualität ist praktisch gleich — gemessen SSIM 0,9855 gegen 0,9839,"
-  info "  im direkten Bildvergleich nicht unterscheidbar. Es geht nur um Zeit gegen Platz.${aus}"
 
-  local antwort
+  info "\n  ${grau}Die Bildqualität liegt bei allen vier dicht beieinander — gemessen SSIM"
+  info "  0,989 (av1) bis 0,979 (klein). Es geht vor allem um Zeit gegen Platz.${aus}"
+
+  local antwort gewaehlt
   while true; do
-    printf '\n  Profil [1/2 oder Name, q=Abbruch] → '
+    printf '\n  Profil [Ziffer oder Name, q=Abbruch] → '
     if ! read -r antwort; then
-      # Keine Eingabe da -- etwa in einem Skript ohne --profil
-      printf '\n'
-      fehler "Keine Eingabe. Bitte --profil schnell oder --profil sparsam angeben."
-      return 1
+      printf '\n'; fehler "Keine Eingabe. Bitte --profil <name> angeben."; return 1
     fi
     case "$antwort" in
-      1) VIDEO_PROFIL="schnell"; return 0;;
-      2) VIDEO_PROFIL="sparsam"; return 0;;
-      schnell|sparsam) VIDEO_PROFIL="$antwort"; return 0;;
       q|Q) return 1;;
-      *) printf '  %sBitte 1, 2, schnell, sparsam oder q%s\n' "$gelb" "$aus";;
+      [0-9]*)
+        gewaehlt="$(video_profil_namen | sed -n "${antwort}p")"
+        if [ -n "$gewaehlt" ]; then VIDEO_PROFIL="$gewaehlt"; return 0; fi;;
+      *)
+        if video_profil_daten "$antwort" >/dev/null 2>&1; then VIDEO_PROFIL="$antwort"; return 0; fi;;
     esac
+    printf '  %sBitte 1–%d, einen Profilnamen oder q%s\n' "$gelb" "$i" "$aus"
   done
 }
 
 befehl_video_run() {
   video_werkzeuge_pruefen || return 1
   [ -s "$VIDEOLISTE" ] || { fehler "Keine Videoliste. Erst '$0 video scan'."; return 1; }
-  local profil=""
+  local profil="" zielhoehe=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --profil) shift; profil="${1:-}";;
       --profil=*) profil="${1#*=}";;
+      --auf) shift; zielhoehe="${1:-}";;
+      --auf=*) zielhoehe="${1#*=}";;
       *) fehler "Unbekannte Option: $1"; return 1;;
     esac
     shift
   done
+  case "$zielhoehe" in
+    0) ;;
+    1080p|1080) zielhoehe=1080;;
+    720p|720)   zielhoehe=720;;
+    *) fehler "--auf versteht 1080p oder 720p."; return 1;;
+  esac
 
   local anzahl
   anzahl="$(awk -F'\t' '$1=="go"' "$VIDEOLISTE" | wc -l | tr -d ' ')"
@@ -1331,7 +1377,7 @@ befehl_video_run() {
   # Kein stiller Standardwert: entweder ausdruecklich angegeben oder gefragt.
   if [ -z "$profil" ]; then
     VIDEO_PROFIL=""
-    video_profil_waehlen "$anzahl" || { info "Abgebrochen."; return 0; }
+    video_profil_waehlen "$anzahl" "$zielhoehe" || { info "Abgebrochen."; return 0; }
     profil="$VIDEO_PROFIL"
   fi
   local -a enc=()
@@ -1342,13 +1388,12 @@ befehl_video_run() {
     return 1
   fi
 
-  local spalte=14; [ "$profil" = "schnell" ] && spalte=13
-  local erwartet
-  erwartet="$(awk -F'\t' -v s="$spalte" '$1=="go"{a+=$9; b+=$s} END{printf "%d %d", a, b}' "$VIDEOLISTE")"
-  local vorher="${erwartet%% *}" nachher="${erwartet##* }"
+  local vorher nachher minuten
+  read -r vorher nachher minuten <<< "$(video_schaetzen "$profil" "$zielhoehe")"
 
   info "\n${fett}$anzahl Videos${aus} neu kodieren, Profil ${fett}$profil${aus}"
-  info "  $(mb "$vorher") → etwa $(mb "$nachher")"
+  [ "$zielhoehe" -gt 0 ] && info "  ${gelb}verkleinert auf ${zielhoehe}p — verlorene Bildpunkte kommen nicht zurück${aus}"
+  info "  $(mb "$vorher") → etwa $(mb "$nachher")   ${grau}(~$(zahl "$minuten" 0) min)${aus}"
   info "  ${grau}Jedes Ergebnis wird geprüft, bevor das Original ins Fegefeuer wandert."
   info "  Schlägt eine Prüfung fehl, bleibt das Original unangetastet.${aus}"
   printf 'Fortfahren? [j/N] '
@@ -1391,8 +1436,13 @@ befehl_video_run() {
     rm -f "$neu"
     printf '  %skodiere …%s\n' "$grau" "$aus"
     local start; start="$(date +%s)"
+    local -a skalierung=()
+    if [ "$zielhoehe" -gt 0 ]; then
+      # min() verhindert, dass kleinere Videos hochskaliert werden
+      skalierung=(-vf "scale=-2:'min($zielhoehe,ih)'")
+    fi
     if ! ffmpeg -hide_banner -nostats -loglevel error -i "$quelle" \
-         "${enc[@]}" -tag:v hvc1 -c:a copy -movflags +faststart "$neu" -y 2>/dev/null; then
+         "${skalierung[@]+"${skalierung[@]}"}" "${enc[@]}" -c:a copy -movflags +faststart "$neu" -y 2>/dev/null; then
       printf '  %s✗%s Kodieren fehlgeschlagen\n' "$rot" "$aus"
       misslungen=$((misslungen+1)); rm -f "$neu"; rm -rf "$tmpdir/aus"; continue
     fi
@@ -1451,14 +1501,16 @@ befehl_video() {
     *) info "${fett}$0 video${aus} <scan|review|run>"
        info "  ${fett}scan${aus} [pfad]              vermessen, nichts anfassen"
        info "  ${fett}review${aus}                   auswählen, was neu kodiert wird"
-       info "  ${fett}run${aus} [--profil <name>]      kodieren, prüfen, Original ins Fegefeuer"
-       info "                             ${grau}ohne --profil wird gefragt${aus}"
+       info "  ${fett}run${aus} [--profil <name>] [--auf 1080p]"
+       info "                             ${grau}kodieren, prüfen, Original ins Fegefeuer"
+       info "                             ohne --profil wird gefragt"
+       info "                             --auf verkleinert zusätzlich — das ist endgültig${aus}"
        echo
        info "  ${fett}Profile${aus}"
        local pn pb
        for pn in $(video_profil_namen); do
-         pb="$(video_profil_beschreibung "$pn")"
-         printf '    %s%-9s%s %-22s %s%s%s\n' "$fett" "$pn" "$aus" "${pb%%|*}" "$grau" "${pb#*|}" "$aus"
+         printf '    %s%-9s%s %-22s %s%s%s\n' "$fett" "$pn" "$aus" \
+           "$(video_profil_feld "$pn" 1)" "$grau" "$(video_profil_feld "$pn" 2)" "$aus"
        done;;
   esac
 }
