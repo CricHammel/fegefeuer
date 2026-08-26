@@ -164,11 +164,12 @@ Die lohnendsten Fäden sind die, an denen ein kleines Paket ein großes mitzieht
 
 ## Videos neu kodieren
 
-> Im Aufbau auf dem Branch `video-neukodierung`. Bisher gibt es nur den
-> Messteil — er fasst keine Datei an.
+> Auf dem Branch `video-neukodierung`.
 
 ```bash
-./fegefeuer.sh video scan [verzeichnis]
+./fegefeuer.sh video scan [verzeichnis]   # vermessen, nichts anfassen
+./fegefeuer.sh video review               # auswählen
+./fegefeuer.sh video run --profil sparsam # kodieren, prüfen, Original sichern
 ```
 
 Videos sind ein Sonderfall und deshalb ein eigener Unterbefehl: Neukodieren
@@ -198,6 +199,34 @@ Tempo und Ersparnis auf Daten beruht und nicht auf einer nackten `-crf`-Zahl:
 
 Bei nahezu gleicher Qualität — SSIM 0,9855 gegen 0,9839, im direkten
 Bildvergleich nicht unterscheidbar.
+
+### Die Prüfung
+
+Kodiert wird in eine Nebendatei. Erst wenn sie **alle** Prüfungen besteht,
+wandert das Original ins Fegefeuer und die neue Fassung nimmt seinen Platz
+ein. Fällt eine durch, wird die neue Datei verworfen und das Original bleibt
+unberührt.
+
+| Prüfung | fängt ab |
+|---|---|
+| Laufzeit auf 0,5 s genau | abgeschnittene Aufnahmen |
+| Tonspur vorhanden | stumme Filme, die erst Monate später auffallen |
+| vollständige SSIM-Messung | Abbrüche, Beschädigungen, grobe Fehlkodierungen |
+| kleiner als vorher | Kodierungen, die nichts bringen |
+
+Die SSIM-Messung läuft über die **ganze** Datei, nicht über Stichproben. Ein
+erster Entwurf verglich drei Ausschnitte — an derselben Stelle ergab das
+0,838 statt 0,948, weil `-ss` vor `-i` bei unterschiedlichen Keyframe-Rastern
+nicht dasselbe Bild trifft. Gute Kodierungen wären so verworfen worden. Der
+vollständige Durchlauf dekodiert beide Dateien ohnehin und ersetzt damit
+zugleich die Prüflesung; er kostet rund die Hälfte der Kodierzeit beim
+schnellen Profil und ein Zehntel beim sparsamen.
+
+Das Original landet mit einem Vermerk im Fegefeuer, der es von verschobenen
+Dateien unterscheidet. Das ist wichtig: Am Originalort liegt danach die neue
+Fassung, und ohne diesen Vermerk würde `pruefen` melden, die Datei sei „von
+selbst zurückgekehrt" und die Quarantänekopie entbehrlich — worauf
+`purge --wieder-da` ein unersetzliches Kameraoriginal gelöscht hätte.
 
 **Dieser Unterbefehl braucht `ffmpeg`** (`brew install ffmpeg`). Er ist der
 einzige Teil, der über die Bordmittel von macOS hinausgeht, und prüft das beim

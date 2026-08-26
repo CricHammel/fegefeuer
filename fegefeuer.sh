@@ -542,7 +542,9 @@ befehl_apply() {
     local zielpfad="$ziel/$rel"
     mkdir -p "$(dirname "$zielpfad")"
     if mv "$pfad" "$zielpfad" 2>/dev/null; then
-      printf '%s\t%s\t%s\n' "$rel" "$pfad" "$kb" >> "$manifest"
+      # Vierte Spalte: nicht bloss beiseitegelegt, sondern durch eine neu
+    # kodierte Fassung ersetzt. pruefen und purge muessen das auseinanderhalten.
+    printf '%s\t%s\t%s\t%s\n' "$rel" "$pfad" "$kb" "ersetzt" >> "$manifest"
       verschoben=$((verschoben+1))
       printf '  %s✓%s %s\n' "$gruen" "$aus" "${pfad/#$HOME/$TILDE}"
     else
@@ -609,11 +611,11 @@ befehl_restore() {
   # Verdraengte Fassungen kommen hierhin, geloescht wird beim Zurueckholen nie
   local beiseite="$QUARANTAENE/_verdraengt-$(date '+%Y-%m-%d_%H%M%S')"
 
-  local n=0 uebersprungen=0 ersetzt=0 vereint=0 misslungen=0
+  local n=0 uebersprungen=0 uebersprungen_ersetzt=0 ersetzt=0 vereint=0 misslungen=0
   local -a bleibt=()
-  local rel original kb quelle
+  local rel original kb art quelle
 
-  while IFS=$'\t' read -r rel original kb <&3; do
+  while IFS=$'\t' read -r rel original kb art <&3; do
     [ -n "$rel" ] || continue
     quelle="$ziel/$rel"
     if [ ! -e "$quelle" ]; then continue; fi
@@ -622,10 +624,16 @@ befehl_restore() {
     if [ -e "$original" ]; then
       case "$modus" in
         ueberspringen)
-          printf '  %s•%s %s %s(ist wieder da — unangetastet)%s\n' \
-            "$gelb" "$aus" "${original/#$HOME/$TILDE}" "$grau" "$aus"
+          if [ "$art" = "ersetzt" ]; then
+            uebersprungen_ersetzt=$((uebersprungen_ersetzt + 1))
+            printf '  %s•%s %s %s(dort liegt die neu kodierte Fassung)%s\n' \
+              "$gelb" "$aus" "${original/#$HOME/$TILDE}" "$grau" "$aus"
+          else
+            printf '  %s•%s %s %s(ist wieder da — unangetastet)%s\n' \
+              "$gelb" "$aus" "${original/#$HOME/$TILDE}" "$grau" "$aus"
+          fi
           uebersprungen=$((uebersprungen + 1))
-          bleibt+=("$(printf '%s\t%s\t%s' "$rel" "$original" "$kb")")
+          bleibt+=("$(printf '%s\t%s\t%s\t%s' "$rel" "$original" "$kb" "$art")")
           continue;;
         zusammenfuehren)
           if [ -d "$original" ] && [ -d "$quelle" ]; then
@@ -644,7 +652,7 @@ befehl_restore() {
           printf '  %s•%s %s %s(keine zwei Ordner — übersprungen)%s\n' \
             "$gelb" "$aus" "${original/#$HOME/$TILDE}" "$grau" "$aus"
           uebersprungen=$((uebersprungen + 1))
-          bleibt+=("$(printf '%s\t%s\t%s' "$rel" "$original" "$kb")")
+          bleibt+=("$(printf '%s\t%s\t%s\t%s' "$rel" "$original" "$kb" "$art")")
           continue;;
         ersetzen)
           mkdir -p "$beiseite/$(dirname "$rel")"
@@ -654,7 +662,7 @@ befehl_restore() {
             printf '  %s✗%s %s %s(aktuelle Fassung ließ sich nicht sichern)%s\n' \
               "$rot" "$aus" "${original/#$HOME/$TILDE}" "$grau" "$aus"
             misslungen=$((misslungen + 1))
-            bleibt+=("$(printf '%s\t%s\t%s' "$rel" "$original" "$kb")")
+            bleibt+=("$(printf '%s\t%s\t%s\t%s' "$rel" "$original" "$kb" "$art")")
             continue
           fi;;
       esac
@@ -667,7 +675,7 @@ befehl_restore() {
     else
       printf '  %s✗%s %s\n' "$rot" "$aus" "${original/#$HOME/$TILDE}"
       misslungen=$((misslungen + 1))
-      bleibt+=("$(printf '%s\t%s\t%s' "$rel" "$original" "$kb")")
+      bleibt+=("$(printf '%s\t%s\t%s\t%s' "$rel" "$original" "$kb" "$art")")
     fi
   done 3< "$manifest"
 
@@ -684,10 +692,16 @@ befehl_restore() {
   [ "$misslungen" -gt 0 ]   && warn "$misslungen fehlgeschlagen"
   if [ "$uebersprungen" -gt 0 ]; then
     warn "$uebersprungen übersprungen, weil der Pfad wieder belegt ist"
-    info "${grau}Das sind meist Caches, die sich selbst neu aufgebaut haben — dann brauchst du"
-    info "die alte Fassung nicht mehr. Sicher löschen mit: ${aus}${fett}$0 purge --wieder-da $stapel${aus}"
-    info "${grau}Wirklich zurück willst du sie mit: ${aus}${fett}$0 restore $stapel --ersetzen${aus}"
-    info "${grau}Ordner nur ergänzen: ${aus}${fett}$0 restore $stapel --zusammenfuehren${aus}"
+    if [ "$uebersprungen_ersetzt" -gt 0 ]; then
+      info "${grau}Davon $uebersprungen_ersetzt Videos, an deren Stelle die neu kodierte Fassung liegt."
+      info "Sieh sie dir an. Willst du das Original zurück:${aus} ${fett}$0 restore $stapel --ersetzen${aus}"
+      info "${grau}Die neue Fassung wird dabei nicht gelöscht, sondern beiseitegelegt.${aus}"
+    fi
+    if [ "$uebersprungen" -gt "$uebersprungen_ersetzt" ]; then
+      info "${grau}Der Rest sind meist Caches, die sich selbst neu aufgebaut haben — dann brauchst"
+      info "du die alte Fassung nicht mehr: ${aus}${fett}$0 purge --wieder-da $stapel${aus}"
+      info "${grau}Ordner nur ergänzen: ${aus}${fett}$0 restore $stapel --zusammenfuehren${aus}"
+    fi
   fi
 
   if [ ! -s "$manifest" ]; then
@@ -702,7 +716,7 @@ befehl_restore() {
 # Was wieder da ist, hat sich als entbehrlich erwiesen.
 befehl_pruefen() {
   [ -d "$QUARANTAENE" ] || { info "Quarantäne ist leer."; return 0; }
-  local gesamt_wieder=0 gesamt_fehlt=0 kb_wieder=0 kb_fehlt=0
+  local gesamt_wieder=0 gesamt_fehlt=0 kb_wieder=0 kb_fehlt=0 gesamt_ersetzt=0 kb_ersetzt=0
   local stapelordner rel original kb name tage
 
   for stapelordner in "$QUARANTAENE"/*/; do
@@ -713,11 +727,13 @@ befehl_pruefen() {
     tage=$(( ( $(date +%s) - $(stat -f %m "$stapelordner") ) / 86400 ))
 
     titel "$name  (vor $tage Tagen)"
-    local w=0 f=0 wkb=0 fkb=0
+    local w=0 f=0 e=0 wkb=0 fkb=0 ekb=0 art
     local -a wieder=()
-    while IFS=$'\t' read -r rel original kb; do
+    while IFS=$'\t' read -r rel original kb art; do
       [ -n "$rel" ] || continue
-      if [ -e "$original" ]; then
+      if [ "$art" = "ersetzt" ]; then
+        e=$((e + 1)); ekb=$((ekb + kb))
+      elif [ -e "$original" ]; then
         w=$((w + 1)); wkb=$((wkb + kb))
         wieder+=("$(printf '%s\t%s' "$kb" "$original")")
       else
@@ -725,8 +741,13 @@ befehl_pruefen() {
       fi
     done < "$stapelordner/_manifest.tsv"
 
-    info "  ${gruen}$w wieder aufgebaut${aus} ($(mb "$wkb"))   ${grau}—  von selbst zurückgekehrt, die Quarantänekopie ist überflüssig${aus}"
-    info "  ${ink:-}$f noch verschwunden ($(mb "$fkb"))   ${grau}—  hat dir bisher nichts gefehlt${aus}"
+    [ "$w" -gt 0 ] && info "  ${gruen}$w wieder aufgebaut${aus} ($(mb "$wkb"))   ${grau}—  von selbst zurückgekehrt, die Quarantänekopie ist überflüssig${aus}"
+    [ "$f" -gt 0 ] && info "  $f noch verschwunden ($(mb "$fkb"))   ${grau}—  hat dir bisher nichts gefehlt${aus}"
+    if [ "$e" -gt 0 ]; then
+      info "  ${gelb}$e ersetzt${aus} ($(mb "$ekb"))   ${grau}—  Originale neu kodierter Videos${aus}"
+      info "    ${grau}Am Originalort liegt die neue Fassung, nicht etwas Nachgewachsenes."
+      info "    Sieh sie dir an, bevor du das Original endgültig löschst.${aus}"
+    fi
 
     if [ "$w" -gt 0 ]; then
       info "\n  ${grau}Wieder aufgebaut, größte zuerst:${aus}"
@@ -740,9 +761,10 @@ befehl_pruefen() {
     fi
     gesamt_wieder=$((gesamt_wieder + w)); gesamt_fehlt=$((gesamt_fehlt + f))
     kb_wieder=$((kb_wieder + wkb)); kb_fehlt=$((kb_fehlt + fkb))
+    gesamt_ersetzt=$((gesamt_ersetzt + e)); kb_ersetzt=$((kb_ersetzt + ekb))
   done
 
-  info "\n${fett}Zusammen:${aus} $gesamt_wieder wieder da ($(mb "$kb_wieder")), $gesamt_fehlt verschwunden ($(mb "$kb_fehlt"))"
+  info "\n${fett}Zusammen:${aus} $gesamt_wieder wieder da ($(mb "$kb_wieder")), $gesamt_fehlt verschwunden ($(mb "$kb_fehlt"))${gesamt_ersetzt:+, $gesamt_ersetzt ersetzt ($(mb "$kb_ersetzt"))}"
 }
 
 befehl_purge() {
@@ -794,14 +816,21 @@ purge_wieder_da() {
   [ ${#stapelliste[@]} -eq 0 ] && { info "Quarantäne ist leer."; return 0; }
 
   # Erst zaehlen, dann fragen
-  local gesamt=0 kb=0 sordner rel original ekb
+  local gesamt=0 kb=0 uebergangen=0 sordner rel original ekb art
   for sordner in "${stapelliste[@]}"; do
     [ -f "$sordner/_manifest.tsv" ] || continue
-    while IFS=$'\t' read -r rel original ekb; do
+    while IFS=$'\t' read -r rel original ekb art; do
       [ -n "$rel" ] || continue
+      # Ersetzte Videooriginale sind nicht "nachgewachsen" -- am Originalort
+      # liegt die neu kodierte Fassung. Die gehoeren nicht in diesen Rundumschlag.
+      [ "$art" = "ersetzt" ] && { uebergangen=$((uebergangen+1)); continue; }
       [ -e "$original" ] && [ -e "$sordner/$rel" ] && { gesamt=$((gesamt+1)); kb=$((kb+ekb)); }
     done < "$sordner/_manifest.tsv"
   done
+  if [ "$uebergangen" -gt 0 ]; then
+    info "${grau}$uebergangen Originale neu kodierter Videos bleiben aussen vor —"
+    info "dort liegt die neue Fassung, nicht etwas Nachgewachsenes.${aus}"
+  fi
   [ "$gesamt" -eq 0 ] && { info "Nichts davon ist bisher zurückgekehrt."; return 0; }
 
   info "${fett}$gesamt Einträge${aus} ($(mb "$kb")) sind am Originalort wieder vorhanden."
@@ -815,12 +844,12 @@ purge_wieder_da() {
   for sordner in "${stapelliste[@]}"; do
     [ -f "$sordner/_manifest.tsv" ] || continue
     local -a bleibt=()
-    while IFS=$'\t' read -r rel original ekb; do
+    while IFS=$'\t' read -r rel original ekb art; do
       [ -n "$rel" ] || continue
-      if [ -e "$original" ] && [ -e "$sordner/$rel" ]; then
+      if [ "$art" != "ersetzt" ] && [ -e "$original" ] && [ -e "$sordner/$rel" ]; then
         rm -rf "$sordner/$rel" && geloescht=$((geloescht+1))
       else
-        bleibt+=("$(printf '%s\t%s\t%s' "$rel" "$original" "$ekb")")
+        bleibt+=("$(printf '%s\t%s\t%s\t%s' "$rel" "$original" "$ekb" "$art")")
       fi
     done < "$sordner/_manifest.tsv"
     if [ ${#bleibt[@]} -eq 0 ]; then : > "$sordner/_manifest.tsv"; else printf '%s\n' "${bleibt[@]}" > "$sordner/_manifest.tsv"; fi
@@ -1110,10 +1139,243 @@ video_bericht() {
   info "\n  Liste: ${VIDEOLISTE/#$HOME/$TILDE}"
 }
 
+# --- Pruefung nach dem Kodieren ---------------------------------------------
+# Reihenfolge nach Kosten: erst das Billige, das die groben Fehler faengt.
+# Gemessen an 4K60: Dekodieren laeuft mit 4,5x Echtzeit, Kodieren mit 0,9x --
+# die Pruefung kostet also rund ein Fuenftel der Kodierzeit.
+VIDEO_SSIM_MIN="0.90"
+
+video_pruefen() {   # video_pruefen <neu> <original> -> SSIM oder Grund, 0 = gut
+  local neu="$1" alt="$2"
+  [ -s "$neu" ] || { echo "Datei ist leer"; return 1; }
+
+  local d_neu d_alt
+  d_neu="$(LC_ALL=C ffprobe -v error -show_entries format=duration -of csv=p=0 "$neu" 2>/dev/null)"
+  d_alt="$(LC_ALL=C ffprobe -v error -show_entries format=duration -of csv=p=0 "$alt" 2>/dev/null)"
+  if [ -z "$d_neu" ] || [ -z "$d_alt" ]; then echo "Laufzeit nicht lesbar"; return 1; fi
+  if ! LC_ALL=C awk -v a="$d_neu" -v b="$d_alt" 'BEGIN{ exit !((a-b < 0.5) && (b-a < 0.5)) }'; then
+    echo "Laufzeit weicht ab: $(zahl "$d_neu" 1) s statt $(zahl "$d_alt" 1) s"; return 1
+  fi
+
+  # Tonspur: ein stiller Film faellt sonst erst Monate spaeter auf
+  local ton_neu ton_alt
+  ton_neu="$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "$neu" 2>/dev/null | wc -l | tr -d ' ')"
+  ton_alt="$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "$alt" 2>/dev/null | wc -l | tr -d ' ')"
+  if [ "$ton_neu" -lt "$ton_alt" ]; then echo "Tonspur fehlt ($ton_neu statt $ton_alt)"; return 1; fi
+
+  # Eine vollstaendige SSIM-Messung statt Stichproben. Stichproben mit
+  # -ss vor -i landen bei unterschiedlichen Keyframe-Rastern nicht immer auf
+  # demselben Bild -- gemessen: 0,838 statt 0,948 an derselben Stelle.
+  # Der Durchlauf dekodiert beide Dateien komplett und ersetzt damit zugleich
+  # die Prueflesung: bricht eine Datei ab, schlaegt er fehl.
+  local ausgabe wert
+  ausgabe="$(ffmpeg -hide_banner -nostats -xerror -i "$neu" -i "$alt" \
+               -lavfi "[0:v][1:v]ssim" -f null - 2>&1)"
+  if [ $? -ne 0 ]; then echo "Datei laesst sich nicht fehlerfrei durchspielen"; return 1; fi
+  wert="$(printf '%s' "$ausgabe" | grep -oE "All:[0-9.]+" | tail -1 | cut -d: -f2)"
+  [ -n "$wert" ] || { echo "SSIM liess sich nicht messen"; return 1; }
+  if LC_ALL=C awk -v w="$wert" -v m="$VIDEO_SSIM_MIN" 'BEGIN{ exit !(w < m) }'; then
+    echo "Bildqualität zu weit weg (SSIM $(zahl "$wert" 3))"; return 1
+  fi
+
+  # Groesser als vorher waere sinnlos. Hier zaehlt die logische Groesse:
+  # du meldet belegte Bloecke und liefert fuer zwei byte-gleiche Dateien
+  # unterschiedliche Werte (gemessen: 114692 gegen 98460 KB).
+  local b_neu b_alt
+  b_neu="$(stat -f %z "$neu" 2>/dev/null)"
+  b_alt="$(stat -f %z "$alt" 2>/dev/null)"
+  if [ -n "$b_neu" ] && [ -n "$b_alt" ] && [ "$b_neu" -ge "$b_alt" ]; then
+    echo "wäre nicht kleiner ($(mb $((b_neu/1024))) statt $(mb $((b_alt/1024))))"; return 1
+  fi
+
+  echo "$wert"
+  return 0
+}
+
+befehl_video_review() {
+  [ -s "$VIDEOLISTE" ] || { fehler "Keine Videoliste. Erst '$0 video scan'."; return 1; }
+  local offen
+  offen="$(awk -F'\t' '$1=="neu" && $12=="lohnt"' "$VIDEOLISTE" | wc -l | tr -d ' ')"
+  [ "$offen" -eq 0 ] && { info "Nichts offen. Weiter mit: ${fett}$0 video run${aus}"; return 0; }
+
+  info "\n${fett}Videos durchgehen${aus} — $offen offen"
+  info "${grau}j=neu kodieren  n=so lassen  a=alle übrigen freigeben  o=Finder  s=später  q=Ende${aus}"
+
+  local -a ausgabe=()
+  local zeile nr=0 abbruch=0 alle=0
+  while IFS= read -r zeile <&3; do
+    local st pfad w h fps dauer kb neu_kb
+    st="$(printf '%s' "$zeile" | cut -f1)"
+    if [ "$st" != "neu" ] || [ "$(printf '%s' "$zeile" | cut -f12)" != "lohnt" ] || [ "$abbruch" -eq 1 ]; then
+      ausgabe+=("$zeile"); continue
+    fi
+    if [ "$alle" -eq 1 ]; then ausgabe+=("$(status_setzen "$zeile" go)"); continue; fi
+    nr=$((nr+1))
+    pfad="$(printf '%s' "$zeile" | cut -f2)"
+    w="$(printf '%s' "$zeile" | cut -f5)"; h="$(printf '%s' "$zeile" | cut -f6)"
+    fps="$(printf '%s' "$zeile" | cut -f7)"; dauer="$(printf '%s' "$zeile" | cut -f8)"
+    kb="$(printf '%s' "$zeile" | cut -f9)"; neu_kb="$(printf '%s' "$zeile" | cut -f14)"
+    printf '\n%s[%d/%d]%s %s\n' "$grau" "$nr" "$offen" "$aus" "${pfad/#$HOME/$TILDE}"
+    printf '  %s%sx%s · %s fps · %s min · %s bpp%s\n' "$grau" "$w" "$h" \
+      "$(zahl "$fps" 0)" "$(zahl "$(LC_ALL=C awk -v d="$dauer" 'BEGIN{print d/60}')" 1)" \
+      "$(printf '%s' "$zeile" | cut -f11 | { read -r b; zahl "$b" 3; })" "$aus"
+    printf '  %s%s%s  →  etwa %s%s%s\n' "$fett" "$(mb "$kb")" "$aus" "$fett" "$(mb "$neu_kb")" "$aus"
+    local antwort
+    while true; do
+      printf '  → '
+      read -r antwort || antwort=q
+      case "$antwort" in
+        j|J) ausgabe+=("$(status_setzen "$zeile" go)"); break;;
+        n|N) ausgabe+=("$(status_setzen "$zeile" keep)"); break;;
+        a|A) alle=1; ausgabe+=("$(status_setzen "$zeile" go)"); break;;
+        o|O) open -R "$pfad" 2>/dev/null;;
+        s|S|"") ausgabe+=("$zeile"); break;;
+        q|Q) abbruch=1; ausgabe+=("$zeile"); break;;
+        *) printf '  %sBitte j / n / a / o / s / q%s\n' "$gelb" "$aus";;
+      esac
+    done
+  done 3< "$VIDEOLISTE"
+
+  if [ ${#ausgabe[@]} -eq 0 ]; then : > "$VIDEOLISTE"; else printf '%s\n' "${ausgabe[@]}" > "$VIDEOLISTE"; fi
+  local n_go
+  n_go="$(awk -F'\t' '$1=="go"' "$VIDEOLISTE" | wc -l | tr -d ' ')"
+  info "\nFreigegeben: ${fett}$n_go${aus}"
+  [ "$n_go" -gt 0 ] && info "Weiter: ${fett}$0 video run --profil sparsam${aus}"
+}
+
+befehl_video_run() {
+  video_werkzeuge_pruefen || return 1
+  [ -s "$VIDEOLISTE" ] || { fehler "Keine Videoliste. Erst '$0 video scan'."; return 1; }
+  local profil="sparsam"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --profil) shift; profil="${1:-sparsam}";;
+      --profil=*) profil="${1#*=}";;
+      *) fehler "Unbekannte Option: $1"; return 1;;
+    esac
+    shift
+  done
+  local -a enc
+  case "$profil" in
+    schnell) enc=(-c:v hevc_videotoolbox -q:v 60);;
+    sparsam) enc=(-c:v libx265 -crf 24 -preset veryfast);;
+    *) fehler "Profil muss 'schnell' oder 'sparsam' sein."; return 1;;
+  esac
+
+  local anzahl
+  anzahl="$(awk -F'\t' '$1=="go"' "$VIDEOLISTE" | wc -l | tr -d ' ')"
+  [ "$anzahl" -eq 0 ] && { warn "Nichts freigegeben. Erst '$0 video review'."; return 0; }
+
+  local spalte=14; [ "$profil" = "schnell" ] && spalte=13
+  local erwartet
+  erwartet="$(awk -F'\t' -v s="$spalte" '$1=="go"{a+=$9; b+=$s} END{printf "%d %d", a, b}' "$VIDEOLISTE")"
+  local vorher="${erwartet%% *}" nachher="${erwartet##* }"
+
+  info "\n${fett}$anzahl Videos${aus} neu kodieren, Profil ${fett}$profil${aus}"
+  info "  $(mb "$vorher") → etwa $(mb "$nachher")"
+  info "  ${grau}Jedes Ergebnis wird geprüft, bevor das Original ins Fegefeuer wandert."
+  info "  Schlägt eine Prüfung fehl, bleibt das Original unangetastet.${aus}"
+  printf 'Fortfahren? [j/N] '
+  local ok; read -r ok || ok=n
+  case "$ok" in j|J) ;; *) info "Abgebrochen."; return 0;; esac
+
+  local stapel; stapel="$(date '+%Y-%m-%d_%H%M%S')"
+  local ziel="$QUARANTAENE/$stapel"
+  local manifest="$ziel/_manifest.tsv"
+  mkdir -p "$ziel"; touch "$manifest"
+  local tmpdir="$ARBEIT/video_arbeit"
+  rm -rf "$tmpdir"; mkdir -p "$tmpdir"
+
+  local fertig=0 misslungen=0 gespart=0 i=0
+  local zeile
+  while IFS= read -r zeile <&3; do
+    local st; st="$(printf '%s' "$zeile" | cut -f1)"
+    [ "$st" = "go" ] || continue
+    i=$((i+1))
+    local pfad verpackt kb
+    pfad="$(printf '%s' "$zeile" | cut -f2)"
+    verpackt="$(printf '%s' "$zeile" | cut -f3)"
+    kb="$(printf '%s' "$zeile" | cut -f9)"
+    [ -e "$pfad" ] || { warn "verschwunden: ${pfad/#$HOME/$TILDE}"; continue; }
+    ist_geschuetzt "$pfad" && { warn "geschützt, übersprungen: ${pfad/#$HOME/$TILDE}"; continue; }
+
+    printf '\n%s[%d/%d]%s %s\n' "$grau" "$i" "$anzahl" "$aus" "${pfad/#$HOME/$TILDE}"
+
+    # Quelle bereitstellen (ZIP wird zum Kodieren ausgepackt)
+    local quelle="$pfad" ausgepackt=""
+    if [ "$verpackt" = "ja" ]; then
+      rm -rf "$tmpdir/aus"; mkdir -p "$tmpdir/aus"
+      unzip -o -q "$pfad" -d "$tmpdir/aus" 2>/dev/null
+      ausgepackt="$(find "$tmpdir/aus" -type f -size +1M 2>/dev/null | head -1)"
+      [ -n "$ausgepackt" ] || { warn "  ZIP liess sich nicht öffnen"; misslungen=$((misslungen+1)); continue; }
+      quelle="$ausgepackt"
+    fi
+
+    local neu="$tmpdir/neu.mp4"
+    rm -f "$neu"
+    printf '  %skodiere …%s\n' "$grau" "$aus"
+    local start; start="$(date +%s)"
+    if ! ffmpeg -hide_banner -nostats -loglevel error -i "$quelle" \
+         "${enc[@]}" -tag:v hvc1 -c:a copy -movflags +faststart "$neu" -y 2>/dev/null; then
+      printf '  %s✗%s Kodieren fehlgeschlagen\n' "$rot" "$aus"
+      misslungen=$((misslungen+1)); rm -f "$neu"; rm -rf "$tmpdir/aus"; continue
+    fi
+    local dauer_s=$(( $(date +%s) - start ))
+
+    printf '  %sprüfe …%s\n' "$grau" "$aus"
+    local grund
+    if ! grund="$(video_pruefen "$neu" "$quelle")"; then
+      printf '  %s✗%s %s — Original bleibt unangetastet\n' "$rot" "$aus" "$grund"
+      misslungen=$((misslungen+1)); rm -f "$neu"; rm -rf "$tmpdir/aus"; continue
+    fi
+
+    # Original ins Fegefeuer, neue Datei an seinen Platz
+    local rel="${pfad#$HOME/}"
+    mkdir -p "$(dirname "$ziel/$rel")"
+    if ! mv "$pfad" "$ziel/$rel" 2>/dev/null; then
+      printf '  %s✗%s Original liess sich nicht sichern\n' "$rot" "$aus"
+      misslungen=$((misslungen+1)); rm -f "$neu"; rm -rf "$tmpdir/aus"; continue
+    fi
+    # Vierte Spalte: nicht bloss beiseitegelegt, sondern durch eine neu
+    # kodierte Fassung ersetzt. pruefen und purge muessen das auseinanderhalten.
+    printf '%s\t%s\t%s\t%s\n' "$rel" "$pfad" "$kb" "ersetzt" >> "$manifest"
+
+    local zielname="${pfad%.zip}"
+    zielname="${zielname%.*}.mp4"
+    mv "$neu" "$zielname"
+    rm -rf "$tmpdir/aus"
+
+    local neu_kb; neu_kb="$(du -sk "$zielname" 2>/dev/null | cut -f1)"
+    gespart=$(( gespart + kb - neu_kb ))
+    fertig=$((fertig+1))
+    printf '  %s✓%s %s → %s   %s(SSIM %s, %d min)%s\n' "$gruen" "$aus" \
+      "$(mb "$kb")" "$(mb "$neu_kb")" "$grau" "$(zahl "$grund" 3)" "$((dauer_s/60))" "$aus"
+
+    # Zustand sofort festhalten: ein Abbruch kostet hoechstens die laufende Datei
+    awk -F'\t' -v OFS='\t' -v p="$pfad" '$2==p{$1="fertig"} {print}' "$VIDEOLISTE" > "$VIDEOLISTE.tmp" \
+      && mv "$VIDEOLISTE.tmp" "$VIDEOLISTE"
+  done 3< "$VIDEOLISTE"
+
+  rm -rf "$tmpdir"
+  [ -s "$manifest" ] || { rm -f "$manifest"; rmdir "$ziel" 2>/dev/null; }
+
+  info "\n${gruen}$fertig neu kodiert${aus}, $(mb "$gespart") gespart"
+  [ "$misslungen" -gt 0 ] && warn "$misslungen fehlgeschlagen — die Originale liegen unverändert an ihrem Platz"
+  if [ "$fertig" -gt 0 ]; then
+    info "\nDie Originale liegen im Fegefeuer: ${fett}$stapel${aus}"
+    info "Erst ansehen, dann: ${fett}$0 purge${aus}   ·   zurück mit: ${fett}$0 restore $stapel${aus}"
+  fi
+}
+
 befehl_video() {
   case "${1:-hilfe}" in
-    scan) shift; befehl_video_scan "${1:-$HOME}";;
-    *) info "Bisher gibt es nur: ${fett}$0 video scan [verzeichnis]${aus}";;
+    scan)   shift; befehl_video_scan "${1:-$HOME}";;
+    review) shift; befehl_video_review;;
+    run)    shift; befehl_video_run "$@";;
+    *) info "${fett}$0 video${aus} <scan|review|run>"
+       info "  ${fett}scan${aus} [pfad]              vermessen, nichts anfassen"
+       info "  ${fett}review${aus}                   auswählen, was neu kodiert wird"
+       info "  ${fett}run${aus} --profil schnell|sparsam   kodieren, prüfen, Original ins Fegefeuer";;
   esac
 }
 
@@ -1130,8 +1392,10 @@ ${fett}fegefeuer.sh${aus} — Festplatte aufräumen ohne Reue
   ${fett}gruppen${aus} [kategorie] Offene Gruppen anzeigen, größte zuerst
   ${fett}apply${aus}             Entschiedenes in die Quarantäne verschieben
   ${fett}brew${aus}              Homebrew durchleuchten, Deinstallations-Vorschlag erzeugen
-  ${fett}video scan${aus} [pfad]  Videos vermessen und zeigen, welche zu üppig kodiert sind
-                    ${grau}(braucht ffmpeg; fasst nichts an)${aus}
+  ${fett}video${aus} <scan|review|run>
+                    Videos vermessen, auswählen und neu kodieren
+                    ${grau}(braucht ffmpeg; Original wandert erst nach bestandener Prüfung
+                     ins Fegefeuer)${aus}
   ${fett}list${aus}              Quarantäne anzeigen
   ${fett}pruefen${aus}           Zeigen, was sich von selbst wieder aufgebaut hat
   ${fett}restore${aus} <stapel>  Einen Stapel zurückholen
