@@ -222,6 +222,8 @@ Diese Pfade lehnt `apply` ab, selbst wenn sie als Kandidat markiert sind:
 - `~/Library/Preferences/ByHost` — rechnergebundene Einstellungen
 - `~/.ssh`, `~/.gnupg`
 - `~/*.7z`
+- `~/.fegefeuer` und das Arbeitsverzeichnis `.arbeit` — fegefeuer findet sich
+  nicht selbst
 - alles außerhalb von `~`
 
 Die zwei wichtigsten Einträge kamen aus Beinahe-Unfällen. Der Dublettensucher
@@ -230,6 +232,15 @@ hätte das die Dateien serverseitig für alle Kollegen entfernt. Und
 `~/Library/Metadata` erzeugt massenhaft Schein-Dubletten, weil Spotlight
 identische Journale in parallelen Pipelines führt. Der Dublettensucher lässt
 `~/Library` inzwischen komplett aus.
+
+Dass das Fegefeuer selbst auf der Liste steht, ist kein Formalismus. Ohne den
+Eintrag fand der Dublettensucher eine Datei im Fegefeuer als Kopie ihrer
+letzten echten Fassung. Wer die aus dem Fegefeuer behielt, schickte die echte
+hinterher, und `purge` hätte nach sieben Tagen beide gelöscht.
+
+Geschützte Pfade fallen aus, *bevor* Dubletten gruppiert werden. Bleibt von
+einer Gruppe nur eine Datei übrig, ist sie keine Dublette mehr und taucht
+nicht auf.
 
 Die Liste steht in der Funktion `ist_geschuetzt` und will angepasst werden,
 wenn dein Rechner andere heikle Orte hat.

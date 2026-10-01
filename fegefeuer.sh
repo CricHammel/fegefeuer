@@ -125,6 +125,9 @@ ist_geschuetzt() {
     "$HOME"/Library/Metadata*|\
     "$HOME"/Library/Group\ Containers/UBF8T346G9.*|\
     *OneDrive*|\
+    "$HOME"/.fegefeuer|"$HOME"/.fegefeuer/*|\
+    "$HOME"/.aufraeumen-quarantaene|"$HOME"/.aufraeumen-quarantaene/*|\
+    "$ARBEIT"|"$ARBEIT"/*|\
     *.noindex/*|\
     "$HOME"/*.7z|\
     "$HOME") return 0;;
@@ -136,6 +139,13 @@ ist_geschuetzt() {
   esac
   return 1
 }
+
+# Was fegefeuer selbst ablegt, darf kein Scan finden. Sonst erscheint eine
+# Datei im Fegefeuer als Dublette ihrer letzten echten Kopie -- behaelt man
+# die aus dem Fegefeuer, wandert auch die echte hinein, und purge loescht
+# nach sieben Tagen beide.
+INTERN_AUSSCHLUSS=(! -path "$HOME/.fegefeuer/*" ! -path "$HOME/.aufraeumen-quarantaene/*"
+                   ! -path "$ARBEIT/*")
 
 # ---------- App installiert? ----------
 app_existiert() {
@@ -328,8 +338,8 @@ befehl_scan() {
       "$f" "große Einzeldatei — bitte einzeln prüfen"
     n=$((n+1))
   done < <(find "$HOME" -type f -size +200M \
-             ! -path "*/Library/Mobile Documents/*" \
-             ! -path "*/.photoslibrary/*" -print0 2>/dev/null)
+             ! -path "*/Library/Mobile Documents/*" ! -path "*/.Trash/*" \
+             ! -path "*/.photoslibrary/*" "${INTERN_AUSSCHLUSS[@]}" -print0 2>/dev/null)
   fortschritt_ende
   info "  ${fett}$n${aus} gefunden"
 
@@ -344,7 +354,7 @@ befehl_scan() {
   find "$HOME" -type f -size +"$dubletten_ab" \
     ! -path "$HOME/Library/*" ! -path "*/.Trash/*" ! -path "*/node_modules/*" \
     ! -path "*/.git/*" ! -path "*/.nvm/*" ! -path "*/.pyenv/*" ! -path "*/.m2/*" \
-    ! -path "*/.cargo/*" ! -path "*/.photoslibrary/*" \
+    ! -path "*/.cargo/*" ! -path "*/.photoslibrary/*" "${INTERN_AUSSCHLUSS[@]}" \
     -print0 2>/dev/null > "$dateiliste"
   local zu_hashen
   zu_hashen="$(tr -dc '\0' < "$dateiliste" | wc -c | tr -d ' ')"
@@ -370,24 +380,25 @@ befehl_scan() {
   # Gruppenschluessel. Erst im review wird entschieden, welche Kopie bleibt --
   # vorher legte die Sortierung das fest, was bei "Kopie von X" neben "X"
   # genau die falsche Datei behalten haette.
+  # Erst aussieben, dann gruppieren. Andersherum bliebe von einer Gruppe, deren
+  # andere Mitglieder geschuetzt oder verschwunden sind, eine einzelne Datei
+  # als "Dublette" stehen -- und im review haette j die letzte Kopie verschoben.
+  local gesiebt="$ARBEIT/hash_gesiebt.tsv"
+  : > "$gesiebt"
   local dubletten=0 gruppen=0 h p
   while IFS=$'\t' read -r h p; do
     ist_geschuetzt "$p" && continue
     [ -e "$p" ] || continue
+    printf '%s\t%s\n' "$h" "$p" >> "$gesiebt"
+  done < <(LC_ALL=C awk -F'\t' 'NR==FNR { anzahl[$1]++; next } anzahl[$1] >= 2' "$hashdatei" "$hashdatei")
+  while IFS=$'\t' read -r h p; do
     kandidat_schreiben "dublette" \
       "$(du -sk "$p" 2>/dev/null | cut -f1)" \
       "$(stat -f '%Sm' -t '%Y-%m-%d' "$p" 2>/dev/null)" \
       "$p" "eine von mehreren inhaltsgleichen Dateien" "dub-${h:0:12}"
     dubletten=$((dubletten + 1))
-  done < <(LC_ALL=C awk -F'\t' '
-      { anzahl[$1]++; sammlung[$1] = sammlung[$1] "\n" $2 }
-      END {
-        for (h in anzahl) {
-          if (anzahl[h] < 2) continue
-          n = split(sammlung[h], teile, "\n")
-          for (i = 2; i <= n; i++) print h "\t" teile[i]
-        }
-      }' "$hashdatei")
+  done < <(LC_ALL=C awk -F'\t' 'NR==FNR { anzahl[$1]++; next } anzahl[$1] >= 2' "$gesiebt" "$gesiebt")
+  rm -f "$gesiebt"
   gruppen="$(awk -F'\t' '$2=="dublette"{print $7}' "$KANDIDATEN.tmp" 2>/dev/null | sort -u | wc -l | tr -d ' ')"
   info "  ${fett}$dubletten${aus} Dateien in ${fett}$gruppen${aus} Gruppen"
 
