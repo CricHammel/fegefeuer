@@ -898,7 +898,7 @@ befehl_restore() {
   # Verdraengte Fassungen kommen hierhin, geloescht wird beim Zurueckholen nie
   local beiseite="$QUARANTAENE/_verdraengt-$(date '+%Y-%m-%d_%H%M%S')"
 
-  local n=0 uebersprungen=0 uebersprungen_ersetzt=0 ersetzt=0 vereint=0 misslungen=0
+  local n=0 uebersprungen=0 uebersprungen_ersetzt=0 ersetzt=0 vereint=0 teils_vereint=0 misslungen=0
   local -a bleibt=()
   local rel original kb art quelle
 
@@ -928,11 +928,23 @@ befehl_restore() {
               fehler "--zusammenfuehren braucht rsync, das hier nicht vorhanden ist."
               return 1
             fi
-            # Nur ergaenzen: was inzwischen neu entstanden ist, bleibt unberuehrt
-            if rsync -a --ignore-existing "$quelle"/ "$original"/ 2>/dev/null; then
-              rm -rf "$quelle"
+            # Nur ergaenzen: was inzwischen neu entstanden ist, bleibt unberuehrt.
+            # --remove-source-files nimmt nur, was tatsaechlich hinueberging.
+            # Wo am Ziel schon eine Fassung liegt, bleibt die alte im Fegefeuer --
+            # ein rm -rf hinterher haette genau diese stillschweigend geloescht.
+            if rsync -a --ignore-existing --remove-source-files "$quelle"/ "$original"/ 2>/dev/null; then
+              find "$quelle" -type d -empty -delete 2>/dev/null
               vereint=$((vereint + 1))
-              printf '  %s⊕%s %s %s(ergänzt)%s\n' "$gruen" "$aus" "${original/#$HOME/$TILDE}" "$grau" "$aus"
+              if [ -e "$quelle" ]; then
+                local nicht_ergaenzt
+                nicht_ergaenzt="$(find "$quelle" ! -type d 2>/dev/null | wc -l | tr -d ' ')"
+                teils_vereint=$((teils_vereint + 1))
+                printf '  %s⊕%s %s %s(ergänzt · %s schon vorhanden, deren alte Fassung bleibt im Fegefeuer)%s\n' \
+                  "$gruen" "$aus" "${original/#$HOME/$TILDE}" "$grau" "$nicht_ergaenzt" "$aus"
+                bleibt+=("$(printf '%s\t%s\t%s\t%s' "$rel" "$original" "$kb" "$art")")
+              else
+                printf '  %s⊕%s %s %s(ergänzt)%s\n' "$gruen" "$aus" "${original/#$HOME/$TILDE}" "$grau" "$aus"
+              fi
               continue
             fi
           fi
@@ -975,6 +987,10 @@ befehl_restore() {
   info ""
   [ "$n" -gt 0 ]            && info "${gruen}$n zurückgeholt${aus}"
   [ "$vereint" -gt 0 ]      && info "${gruen}$vereint Ordner ergänzt${aus}"
+  if [ "$teils_vereint" -gt 0 ]; then
+    info "${grau}Bei $teils_vereint davon lag am Ziel schon eine eigene Fassung einzelner Dateien."
+    info "Die alten Fassungen bleiben im Stapel — ansehen mit: ${aus}${fett}open \"$ziel\"${aus}"
+  fi
   [ "$ersetzt" -gt 0 ]      && info "${gruen}$ersetzt ersetzt${aus} ${grau}— verdrängte Fassungen: $beiseite${aus}"
   [ "$misslungen" -gt 0 ]   && warn "$misslungen fehlgeschlagen"
   if [ "$uebersprungen" -gt 0 ]; then

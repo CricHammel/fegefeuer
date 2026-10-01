@@ -182,6 +182,11 @@ solche Pfade und bietet zwei bewusste Alternativen:
 Auch `--ersetzen` löscht nichts: die verdrängte Fassung landet in
 `~/.fegefeuer/_verdraengt-<datum>/`.
 
+Ebenso `--zusammenfuehren`: Es holt nur zurück, was am Ziel fehlt. Liegt dort
+von einer Datei schon eine eigene Fassung, bleibt die alte im Stapel und im
+Manifest. Früher wurde der Stapelordner nach dem Ergänzen komplett entfernt —
+mitsamt genau diesen alten Fassungen.
+
 **Ein freigegebener Ordner nimmt nichts Behaltenes mit.** Wenn du
 `~/Library/Caches/ms-playwright` freigibst, darin aber `chromium-1234`
 ausdrücklich behalten wolltest, würde `mv` den Unterordner kommentarlos
