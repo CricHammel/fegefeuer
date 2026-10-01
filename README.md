@@ -43,11 +43,44 @@ Beim Start prüft das Skript, ob es auf macOS läuft und ob alles Nötige da ist
 | `cache` | Caches, die sich selbst neu aufbauen |
 | `toolchain` | alte Node-Versionen, veraltete Playwright-Browser |
 | `gross` | Einzeldateien über 200 MB |
-| `dublette` | inhaltsgleiche Dateien (SHA-1 über alles ab 1 MB) |
+| `dublette` | inhaltsgleiche Dateien (SHA-1, Mindestgröße einstellbar) |
 
 Ob eine App noch installiert ist, entscheidet nicht der Ordnername, sondern
 eine Spotlight-Abfrage nach der Bundle-ID (`mdfind kMDItemCFBundleIdentifier`).
 Eine frühere Namensheuristik hielt VLC und iTerm für deinstalliert.
+
+Die Mindestgröße für den Dublettenvergleich lässt sich setzen — hashen kostet
+Zeit, und unter einer gewissen Größe lohnt die Mühe selten:
+
+```bash
+./fegefeuer.sh scan --dubletten-ab 10M
+```
+
+Ohne Angabe gilt 1 MB. Erlaubt sind `500k`, `10M`, `2G` oder eine nackte Zahl
+als Bytes.
+
+### Dubletten: du wählst, welche bleibt
+
+Bei inhaltsgleichen Dateien lautet die Frage nicht „weg oder nicht", sondern
+„welche von diesen soll bleiben". Alle Kopien stehen nebeneinander:
+
+```
+[3/83] 3 gleiche Dateien · je 3 MB
+  1  ~/Projekt/Datei.bin                    2024-03-01  ← älteste, Vorschlag
+  2  ~/Projekt/Datei2.bin                   2025-10-01
+  3  ~/Projekt/Kopie von Datei.bin          2026-01-01
+  Welche soll bleiben? Die anderen wandern ins Fegefeuer.
+  1-3=diese behalten  n=alle behalten  o=Finder  s=später  q=Ende
+```
+
+Vorgeschlagen wird die älteste — eine Kopie ist meist jünger als ihr Original.
+Entscheiden musst du. Einen Griff, der alle löscht, gibt es hier nicht: Eine
+Zahl behält genau diese Datei, `n` behält alle. Aus demselben Grund verweigert
+`mark dublette go` den Dienst.
+
+Früher bestimmte die Sortierung, welche Datei als Original galt. Bei
+`Datei`/`Datei2` traf das zufällig zu, bei `Kopie von X` neben `X` hätte es
+genau die falsche behalten.
 
 ### Durchsicht
 

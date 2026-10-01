@@ -68,6 +68,10 @@ NR == FNR {
         produktname[schluessel] = tok2
       }
     }
+  } else if (NF >= 7 && $7 != "") {
+    # Der Scan hat den Schluessel schon gesetzt (etwa bei Dubletten, wo alle
+    # inhaltsgleichen Dateien zusammengehoeren).
+    schluessel = $7
   } else {
     schluessel = $5
   }
@@ -77,6 +81,10 @@ NR == FNR {
 END {
   for (i = 1; i <= FNR; i++) {
     g = gruppe[i]
+    # Nur die ersten sechs Spalten weiterreichen; 7 und 8 setzen wir neu.
+    n6 = split(reihen[i], feld, "\t")
+    reihen[i] = feld[1]
+    for (j = 2; j <= 6 && j <= n6; j++) reihen[i] = reihen[i] "\t" feld[j]
     if (index(g, ".") > 0) {
       # Schluessel traegt schon Hersteller.Produkt
       hersteller = g; sub(/\..*/, "", hersteller)

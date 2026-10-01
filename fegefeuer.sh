@@ -183,12 +183,34 @@ schreibe_kandidaten() {
 }
 
 kandidat_schreiben() {
-  # kategorie, groesse_kb, mtime, pfad, begruendung
-  printf 'neu\t%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$5" >> "$KANDIDATEN.tmp"
+  # kategorie, groesse_kb, mtime, pfad, begruendung, [gruppenschluessel]
+  if [ -n "${6:-}" ]; then
+    printf 'neu\t%s\t%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$5" "$6" >> "$KANDIDATEN.tmp"
+  else
+    printf 'neu\t%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$5" >> "$KANDIDATEN.tmp"
+  fi
 }
 
 # ---------- scan ----------
 befehl_scan() {
+  local dubletten_ab="1M"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dubletten-ab) shift; dubletten_ab="${1:-1M}";;
+      --dubletten-ab=*) dubletten_ab="${1#*=}";;
+      *) fehler "Unbekannte Option: $1"; return 1;;
+    esac
+    shift
+  done
+  # Einheit abtrennen und den Rest auf Ziffern pruefen. Nur das letzte
+  # Zeichen anzusehen reicht nicht -- "riesig" endet auch auf g.
+  local zahl="${dubletten_ab%[kKmMgGcC]}"
+  case "$zahl" in
+    ''|*[!0-9]*) fehler "--dubletten-ab versteht z.B. 500k, 1M, 10M, 2G."; return 1;;
+  esac
+  case "$dubletten_ab" in
+    *[0-9]) dubletten_ab="${dubletten_ab}c";;   # nackte Zahl = Bytes
+  esac
   : > "$KANDIDATEN.tmp"
   titel "1/5  Verwaiste App-Reste in ~/Library"
   local -a ordnerliste=("Application Support" "Caches" "Containers" "Group Containers" \
@@ -301,7 +323,7 @@ befehl_scan() {
   fortschritt_ende
   info "  ${fett}$n${aus} gefunden"
 
-  titel "5/5  Doppelte Dateien (>1 MB, gleicher Inhalt)"
+  titel "5/5  Doppelte Dateien (ab $dubletten_ab, gleicher Inhalt)"
   local hashdatei="$ARBEIT/hashes.tsv"
   local dateiliste="$ARBEIT/hash_liste.txt"
   local rohhashes="$ARBEIT/hash_roh.txt"
@@ -309,7 +331,7 @@ befehl_scan() {
   # OneDrive-Sync -- gleiche Inhalte sind da gewollt bzw. serverseitig.
   fortschritt_start
   fortschritt_offen "Dateien sammeln …"
-  find "$HOME" -type f -size +1M \
+  find "$HOME" -type f -size +"$dubletten_ab" \
     ! -path "$HOME/Library/*" ! -path "*/.Trash/*" ! -path "*/node_modules/*" \
     ! -path "*/.git/*" ! -path "*/.nvm/*" ! -path "*/.pyenv/*" ! -path "*/.m2/*" \
     ! -path "*/.cargo/*" ! -path "*/.photoslibrary/*" \
@@ -334,19 +356,30 @@ befehl_scan() {
   awk '{ print substr($0,1,40) "\t" substr($0,43) }' "$rohhashes" | sort > "$hashdatei"
   rm -f "$dateiliste" "$rohhashes"
 
-  # Pro Gruppe bleibt die erste Datei unangetastet, die weiteren werden
-  # vorgeschlagen -- welche Kopie wirklich weg soll, entscheidest du im review.
-  local dubletten=0 h p original
-  while IFS=$'\t' read -r h p original; do
+  # Alle Mitglieder einer Gruppe werden Kandidaten und bekommen denselben
+  # Gruppenschluessel. Erst im review wird entschieden, welche Kopie bleibt --
+  # vorher legte die Sortierung das fest, was bei "Kopie von X" neben "X"
+  # genau die falsche Datei behalten haette.
+  local dubletten=0 gruppen=0 h p
+  while IFS=$'\t' read -r h p; do
     ist_geschuetzt "$p" && continue
     [ -e "$p" ] || continue
     kandidat_schreiben "dublette" \
       "$(du -sk "$p" 2>/dev/null | cut -f1)" \
       "$(stat -f '%Sm' -t '%Y-%m-%d' "$p" 2>/dev/null)" \
-      "$p" "gleicher Inhalt wie ${original/#$HOME/$TILDE}"
+      "$p" "eine von mehreren inhaltsgleichen Dateien" "dub-${h:0:12}"
     dubletten=$((dubletten + 1))
-  done < <(awk -F'\t' '{ if ($1==letzter) print $0 "\t" ersterpfad; else { letzter=$1; ersterpfad=$2 } }' "$hashdatei")
-  info "  ${fett}$dubletten${aus} ueberzaehlige Kopien"
+  done < <(LC_ALL=C awk -F'\t' '
+      { anzahl[$1]++; sammlung[$1] = sammlung[$1] "\n" $2 }
+      END {
+        for (h in anzahl) {
+          if (anzahl[h] < 2) continue
+          n = split(sammlung[h], teile, "\n")
+          for (i = 2; i <= n; i++) print h "\t" teile[i]
+        }
+      }' "$hashdatei")
+  gruppen="$(awk -F'\t' '$2=="dublette"{print $7}' "$KANDIDATEN.tmp" 2>/dev/null | sort -u | wc -l | tr -d ' ')"
+  info "  ${fett}$dubletten${aus} Dateien in ${fett}$gruppen${aus} Gruppen"
 
   # Bestehende keep/go-Entscheidungen übernehmen
   if [ -s "$KANDIDATEN" ]; then
@@ -509,6 +542,62 @@ r_gruppe_abschliessen() {
   mt1="$(printf '%s' "${offen[0]}" | cut -f4)"
   [ -n "$etikett" ] || etikett="$(basename "$pfad1")"
 
+  # --- Dubletten: die Frage lautet nicht "weg oder nicht", sondern
+  # "welche von diesen gleichen Dateien soll bleiben". Es muss immer eine
+  # uebrig bleiben -- ein Griff, der alle loescht, gibt es hier nicht.
+  local kategorie
+  kategorie="$(printf '%s' "${offen[0]}" | cut -f2)"
+  if [ "$kategorie" = "dublette" ] && [ "$n_offen" -ge 2 ]; then
+    local -a nach_alter=()
+    while IFS= read -r zeile; do nach_alter+=("$zeile"); done < <(printf '%s\n' "${offen[@]}" | sort -t$'\t' -k4,4)
+    local erstes_kb
+    erstes_kb="$(printf '%s' "${nach_alter[0]}" | cut -f3)"
+    printf '\n%s[%d/%d]%s %s%d gleiche Dateien%s %s· je %s%s\n' \
+      "$grau" "$R_NR" "$R_GESAMT" "$aus" "$fett" "$n_offen" "$aus" "$grau" "$(mb "$erstes_kb")" "$aus"
+    local i=0 pfad mtime zusatz
+    for zeile in "${nach_alter[@]}"; do
+      i=$((i + 1))
+      pfad="$(printf '%s' "$zeile" | cut -f5)"
+      mtime="$(printf '%s' "$zeile" | cut -f4)"
+      zusatz=""
+      [ "$i" -eq 1 ] && zusatz="  ${gruen}← älteste, Vorschlag${aus}"
+      printf '  %s%d%s  %-52s %s%s%s%s\n' "$fett" "$i" "$aus" \
+        "${pfad/#$HOME/$TILDE}" "$grau" "$mtime" "$aus" "$zusatz"
+    done
+    [ "$entschieden" -gt 0 ] && printf '  %s(%d weitere dieser Gruppe hast du schon entschieden)%s\n' "$grau" "$entschieden" "$aus"
+    printf '  %sWelche soll bleiben? Die anderen wandern ins Fegefeuer.%s\n' "$grau" "$aus"
+    local antwort k
+    while true; do
+      tasten "  " "1-$n_offen:diese behalten" "n:alle behalten" "o:Finder" "s:später" "q:Ende"
+      printf '  → '
+      read -r antwort || antwort=q
+      case "$antwort" in
+        n|N) for zeile in "${nach_alter[@]}"; do R_AUSGABE+=("$(status_setzen "$zeile" keep)"); done; return 0;;
+        o|O) open -R "$(printf '%s' "${nach_alter[0]}" | cut -f5)" 2>/dev/null;;
+        s|S|"") for zeile in "${nach_alter[@]}"; do R_AUSGABE+=("$zeile"); done; return 0;;
+        q|Q) R_ABBRUCH=1; for zeile in "${nach_alter[@]}"; do R_AUSGABE+=("$zeile"); done; return 0;;
+        *[!0-9]*|'') printf '  %sBitte eine Zahl von 1 bis %d, oder n / o / s / q%s\n' "$gelb" "$n_offen" "$aus";;
+        *)
+          k="$antwort"
+          if [ "$k" -ge 1 ] && [ "$k" -le "$n_offen" ]; then
+            i=0
+            for zeile in "${nach_alter[@]}"; do
+              i=$((i + 1))
+              if [ "$i" -eq "$k" ]; then
+                R_AUSGABE+=("$(status_setzen "$zeile" keep)")
+              else
+                R_AUSGABE+=("$(status_setzen "$zeile" go)")
+                R_GO_PFADE="$R_GO_PFADE
+$(printf '%s' "$zeile" | cut -f5)"
+              fi
+            done
+            return 0
+          fi
+          printf '  %sBitte eine Zahl von 1 bis %d, oder n / o / s / q%s\n' "$gelb" "$n_offen" "$aus";;
+      esac
+    done
+  fi
+
   # --- nur ein offener Eintrag: schlichte Ansicht ---
   if [ "$n_offen" -eq 1 ]; then
     printf '\n%s[%d/%d]%s %s%s%s\n' "$grau" "$R_NR" "$R_GESAMT" "$aus" "$fett" "$(mb "$offen_kb")" "$aus"
@@ -627,7 +716,11 @@ befehl_review() {
   [ "$R_GESAMT" -eq 0 ] && { info "Alles in dieser Auswahl ist bereits entschieden."; return 0; }
 
   info "\n${fett}Durchsicht${aus}  —  ${R_GESAMT} offene $([ "$R_GESAMT" -eq 1 ] && echo Gruppe || echo Gruppen)"
-  info "${grau}Einträge desselben Programms sind zusammengefasst.${aus}"
+  if [ "$kat_filter" = "dublette" ]; then
+    info "${grau}Inhaltsgleiche Dateien stehen zusammen — du wählst, welche bleibt.${aus}"
+  else
+    info "${grau}Einträge desselben Programms sind zusammengefasst.${aus}"
+  fi
 
   R_PUFFER=(); R_AUSGABE=(); R_ABBRUCH=0; R_NR=0; R_UEBERDECKT=0
   # Schon freigegebene Ordner merken: Was darin liegt, wird mitverschoben
@@ -1099,6 +1192,12 @@ befehl_mark() {
   case "$status" in go|keep|neu) ;; *) fehler "Status muss go, keep oder neu sein."; return 1;; esac
   [ -n "$kat" ] || { fehler "Welche Kategorie? (app-rest, cache, toolchain, gross, dublette)"; return 1; }
   [ -f "$KANDIDATEN" ] || { fehler "Keine Kandidaten."; return 1; }
+  if [ "$kat" = "dublette" ] && [ "$status" = "go" ]; then
+    fehler "Bei Dubletten würde das jede Kopie löschen, auch die letzte."
+    info "${grau}Dort muss je Gruppe eine Datei bleiben — das entscheidest du im review:${aus}"
+    info "  ${fett}$0 review dublette${aus}"
+    return 1
+  fi
   local n
   n="$(awk -F'\t' -v k="$kat" '$2==k' "$KANDIDATEN" | wc -l | tr -d ' ')"
   [ "$n" -eq 0 ] && { warn "Kategorie '$kat' enthaelt nichts."; return 0; }
@@ -1870,7 +1969,7 @@ if [ ! -d "$QUARANTAENE" ] && [ -d "$QUARANTAENE_ALT" ]; then
 fi
 
 case "${1:-hilfe}" in
-  scan) befehl_scan;;
+  scan) shift; befehl_scan "$@";;
   review) befehl_review "${2:-}";;
   apply) befehl_apply;;
   list) befehl_list;;
