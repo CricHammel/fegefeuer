@@ -379,6 +379,19 @@ bericht_schreiben() {
   } > "$BERICHT"
 }
 
+# Tastenbelegung an genau einer Stelle, damit sie am Prompt und in der
+# Fehlermeldung nicht auseinanderlaufen. Sie steht bei jeder Frage -- wer
+# 150 Dubletten durchgeht, soll nicht raten muessen, was gerade moeglich ist.
+tasten() {   # tasten <einzug> <taste:bedeutung> ...
+  local einzug="$1"; shift
+  local zeile="" paar trenner=""
+  for paar in "$@"; do
+    zeile="$zeile$trenner${fett}${paar%%:*}${aus}=${grau}${paar#*:}${aus}"
+    trenner="  "
+  done
+  printf '%s%s\n' "$einzug" "$zeile"
+}
+
 # ---------- review ----------
 # Eintraege desselben Programms liegen ueber viele Library-Ordner verstreut.
 # Sie werden zu einer Gruppe zusammengefasst und gemeinsam entschieden.
@@ -400,6 +413,7 @@ r_einzeln_fragen() {   # r_einzeln_fragen <zeile>  -> Antwort in R_ANTWORT
   printf '    %s%s · %s%s\n' "$grau" "$grund" "$mt" "$aus"
   local antwort
   while true; do
+    tasten "    " "j:weg" "n:behalten" "o:Finder" "s:später" "q:Ende"
     printf '    → '
     read -r antwort || antwort=q
     case "$antwort" in
@@ -459,6 +473,7 @@ r_gruppe_abschliessen() {
     [ "$entschieden" -gt 0 ] && printf '  %s(%d weitere Einträge dieser Gruppe hast du schon entschieden)%s\n' "$grau" "$entschieden" "$aus"
     local antwort
     while true; do
+      tasten "  " "j:weg" "n:behalten" "o:im Finder zeigen" "s:später" "q:Ende"
       printf '  → '
       read -r antwort || antwort=q
       case "$antwort" in
@@ -494,8 +509,7 @@ r_gruppe_abschliessen() {
 
   local antwort
   while true; do
-    printf '  %sj%s=alle weg  %sn%s=alle behalten  %se%s=einzeln  %so%s=Finder  %ss%s=später  %sq%s=Ende\n' \
-      "$fett" "$aus" "$fett" "$aus" "$fett" "$aus" "$fett" "$aus" "$fett" "$aus" "$fett" "$aus"
+    tasten "  " "j:alle weg" "n:alle behalten" "e:einzeln durchgehen" "o:Finder" "s:später" "q:Ende"
     printf '  → '
     read -r antwort || antwort=q
     case "$antwort" in
@@ -1472,7 +1486,7 @@ befehl_video_review() {
   [ "$offen" -eq 0 ] && { info "Nichts offen. Weiter mit: ${fett}$0 video run${aus}"; return 0; }
 
   info "\n${fett}Videos durchgehen${aus} — $offen offen"
-  info "${grau}j=neu kodieren  n=so lassen  a=alle übrigen freigeben  o=Finder  s=später  q=Ende${aus}"
+  info "${grau}Die Originale wandern nach bestandener Prüfung ins Fegefeuer.${aus}"
 
   local -a ausgabe=()
   local zeile nr=0 abbruch=0 alle=0
@@ -1495,6 +1509,7 @@ befehl_video_review() {
     printf '  %s%s%s  →  etwa %s%s%s\n' "$fett" "$(mb "$kb")" "$aus" "$fett" "$(mb "$neu_kb")" "$aus"
     local antwort
     while true; do
+      tasten "  " "j:neu kodieren" "n:so lassen" "a:alle übrigen freigeben" "o:Finder" "s:später" "q:Ende"
       printf '  → '
       read -r antwort || antwort=q
       case "$antwort" in

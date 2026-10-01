@@ -68,6 +68,9 @@ Produkten werden getrennt gehalten — `microsoft · powerpoint`,
 `microsoft · sharepoint` und `microsoft · teams` sind drei Entscheidungen,
 keine einzige.
 
+Die Tastenbelegung steht bei **jeder** Frage, nicht nur einmal im Kopf — wer
+150 Dubletten durchgeht, soll nicht raten müssen.
+
 `q` unterbricht jederzeit, der Stand bleibt erhalten. Bereits entschiedene
 Einträge werden nie erneut gefragt, und eine Gruppenantwort überschreibt sie
 nicht.
