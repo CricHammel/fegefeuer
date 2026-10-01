@@ -49,6 +49,13 @@ Ob eine App noch installiert ist, entscheidet nicht der Ordnername, sondern
 eine Spotlight-Abfrage nach der Bundle-ID (`mdfind kMDItemCFBundleIdentifier`).
 Eine frühere Namensheuristik hielt VLC und iTerm für deinstalliert.
 
+Geprüft werden nur **Ordner**. App-Daten liegen in Ordnern; eine Datei mit
+Punkt im Namen ist fast immer ein Dateiname, keine Bundle-ID. Sonst gälten
+`fsck_hfs.log` in `~/Library/Logs` oder `default.store` in
+`~/Library/Application Support` als Reste nicht installierter Programme.
+Ausgenommen sind `.savedState` und `.binarycookies` — die zwei Formen, die
+als Datei auftreten und sehr wohl eine Bundle-ID tragen.
+
 Die Mindestgröße für den Dublettenvergleich lässt sich setzen — hashen kostet
 Zeit, und unter einer gewissen Größe lohnt die Mühe selten:
 

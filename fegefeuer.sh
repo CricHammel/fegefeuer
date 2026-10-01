@@ -231,6 +231,16 @@ befehl_scan() {
       fortschritt "$gesehen" "$zu_pruefen" "Library-Ordner gegen installierte Apps prüfen"
       local b; b="$(basename "$e")"
       case "$b" in com.apple.*|group.com.apple.*|.DS_Store) continue;; esac
+      # App-Daten liegen in Ordnern. Eine Datei mit Punkt im Namen ist fast
+      # immer ein Dateiname, keine Bundle-ID -- fsck_hfs.log oder
+      # default.store sind keine Programmreste. Ausgenommen sind die zwei
+      # Formen, die als Datei auftreten und sehr wohl eine Bundle-ID tragen.
+      if [ ! -d "$e" ]; then
+        case "$b" in
+          *.savedState|*.binarycookies) ;;
+          *) continue;;
+        esac
+      fi
       ist_geschuetzt "$e" && continue
       local id="$b"
       id="${id%.savedState}"; id="${id%.binarycookies}"
