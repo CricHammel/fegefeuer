@@ -75,6 +75,27 @@ Die Tastenbelegung steht bei **jeder** Frage, nicht nur einmal im Kopf — wer
 Einträge werden nie erneut gefragt, und eine Gruppenantwort überschreibt sie
 nicht.
 
+### Wenn sich Kandidaten überlappen
+
+Dieselben Bytes können mehrfach auffallen: `~/Library/Caches/Homebrew` landet
+als Cache in der Liste, und die großen `.dmg`-Dateien darin noch einmal
+einzeln als `gross`. In einem echten Lauf waren das 11 Einträge mit 3,16 GB,
+die bereits im Elternordner steckten.
+
+Damit geht fegefeuer so um:
+
+- **Summen zählen jeden Platz einmal.** Was innerhalb eines anderen Kandidaten
+  liegt, wird nicht addiert; der Bericht weist den Unterschied aus.
+- **Beim Elternordner steht, was er mitnimmt** — „enthält 2 weitere Kandidaten
+  (500 MB) — die wandern mit".
+- **Gibst du den Elternordner frei, entfallen die Fragen danach.** Was darin
+  liegt, wandert ohnehin mit und wird nicht noch einmal einzeln gefragt.
+- **Umgekehrt geht auch:** Elternordner behalten, einzelne Dateien darin
+  freigeben. Dann wird jede Datei gefragt und nur sie verschoben.
+- **Behältst du etwas innerhalb eines freigegebenen Ordners**, verweigert
+  `apply` den Elternordner und nennt den Grund — sonst nähme `mv` das
+  Behaltene stillschweigend mit.
+
 Für ganze Kategorien geht es auch ohne Einzelfragen:
 
 ```bash

@@ -154,6 +154,30 @@ gruppen_zuordnen() {
     && mv "$KANDIDATEN.grp" "$KANDIDATEN"
 }
 
+# Summiert Groessen, ohne doppelt zu zaehlen, was innerhalb eines anderen
+# Eintrags liegt. Ohne das meldet der Scan den Homebrew-Cache und zugleich
+# die grossen Dateien darin -- bei einem Lauf waren das 3,16 GB zu viel.
+summe_echt() {   # summe_echt [statusfilter]
+  LC_ALL=C awk -F'\t' -v f="${1:-}" '
+    NR==FNR { if (f=="" || $1==f) pfad[++n]=$5; next }
+    (f=="" || $1==f) {
+      for (i=1; i<=n; i++) if (index($5, pfad[i] "/") == 1) next
+      summe += $3
+    }
+    END { print summe+0 }' "$KANDIDATEN" "$KANDIDATEN"
+}
+
+# Liegt der Pfad innerhalb eines der uebergebenen Pfade?
+liegt_innerhalb() {   # liegt_innerhalb <pfad> <pfadliste>
+  local pfad="$1" liste="$2" p
+  [ -n "$liste" ] || return 1
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    case "$pfad" in "$p"/*) return 0;; esac
+  done <<< "$liste"
+  return 1
+}
+
 schreibe_kandidaten() {
   if [ "$#" -eq 0 ]; then : > "$KANDIDATEN"; else printf '%s\n' "$@" > "$KANDIDATEN"; fi
 }
@@ -344,7 +368,13 @@ befehl_scan() {
   bericht_schreiben
   titel "Ergebnis"
   info "  Kandidaten: $(wc -l < "$KANDIDATEN" | tr -d ' ')"
-  info "  Gesamt:     $(awk -F'\t' '{s+=$3} END{print s}' "$KANDIDATEN" | { read -r k; mb "$k"; })"
+  local roh echt
+  roh="$(awk -F'\t' '{s+=$3} END{print s+0}' "$KANDIDATEN")"
+  echt="$(summe_echt)"
+  info "  Gesamt:     $(mb "$echt")"
+  if [ "$roh" -gt "$echt" ]; then
+    info "  ${grau}($(mb $((roh - echt))) davon liegen innerhalb anderer Kandidaten und zählen nur einmal)${aus}"
+  fi
   info "\n  Bericht:  $BERICHT"
   info "  Weiter:   ${fett}$0 review${aus}"
 }
@@ -397,6 +427,8 @@ tasten() {   # tasten <einzug> <taste:bedeutung> ...
 # Sie werden zu einer Gruppe zusammengefasst und gemeinsam entschieden.
 R_PUFFER=()
 R_AUSGABE=()
+R_GO_PFADE=""
+R_UEBERDECKT=0
 R_ABBRUCH=0
 R_NR=0
 R_GESAMT=0
@@ -454,6 +486,21 @@ r_gruppe_abschliessen() {
   local n_offen=${#offen[@]}
   [ "$n_offen" -eq 0 ] && return 0
 
+  # Liegt alles davon in einem bereits freigegebenen Ordner? Dann eruebrigt
+  # sich die Frage -- es wandert ohnehin mit.
+  local alle_drin=1 pruef
+  for zeile in "${offen[@]}"; do
+    pruef="$(printf '%s' "$zeile" | cut -f5)"
+    liegt_innerhalb "$pruef" "$R_GO_PFADE" || { alle_drin=0; break; }
+  done
+  if [ "$alle_drin" -eq 1 ]; then
+    for zeile in "${offen[@]}"; do
+      R_AUSGABE+=("$(status_setzen "$zeile" go)")
+      R_UEBERDECKT=$((R_UEBERDECKT + 1))
+    done
+    return 0
+  fi
+
   R_NR=$((R_NR + 1))
   local etikett grund1 pfad1 mt1
   etikett="$(printf '%s' "${offen[0]}" | cut -f8)"
@@ -469,6 +516,12 @@ r_gruppe_abschliessen() {
     printf '  %s%s · geändert %s%s\n' "$grau" "$grund1" "$mt1" "$aus"
     if [ -d "$pfad1" ]; then
       printf '  %sInhalt: %s%s\n' "$grau" "$(ls -1 "$pfad1" 2>/dev/null | head -4 | tr '\n' ' ')" "$aus"
+      local enthaltene
+      enthaltene="$(awk -F'\t' -v p="$pfad1/" 'index($5,p)==1 {n++; s+=$3} END{printf "%d %d", n+0, s+0}' "$KANDIDATEN")"
+      if [ "${enthaltene%% *}" -gt 0 ]; then
+        printf '  %senthält %s weitere Kandidaten (%s) — die wandern mit%s\n' \
+          "$grau" "${enthaltene%% *}" "$(mb "${enthaltene##* }")" "$aus"
+      fi
     fi
     [ "$entschieden" -gt 0 ] && printf '  %s(%d weitere Einträge dieser Gruppe hast du schon entschieden)%s\n' "$grau" "$entschieden" "$aus"
     local antwort
@@ -477,7 +530,9 @@ r_gruppe_abschliessen() {
       printf '  → '
       read -r antwort || antwort=q
       case "$antwort" in
-        j|J) R_AUSGABE+=("$(status_setzen "${offen[0]}" go)"); return 0;;
+        j|J) R_AUSGABE+=("$(status_setzen "${offen[0]}" go)")
+             R_GO_PFADE="$R_GO_PFADE
+$pfad1"; return 0;;
         n|N) R_AUSGABE+=("$(status_setzen "${offen[0]}" keep)"); return 0;;
         o|O) open -R "$pfad1" 2>/dev/null;;
         s|S|"") R_AUSGABE+=("${offen[0]}"); return 0;;
@@ -513,7 +568,11 @@ r_gruppe_abschliessen() {
     printf '  → '
     read -r antwort || antwort=q
     case "$antwort" in
-      j|J) for zeile in "${offen[@]}"; do R_AUSGABE+=("$(status_setzen "$zeile" go)"); done; return 0;;
+      j|J) for zeile in "${offen[@]}"; do
+             R_AUSGABE+=("$(status_setzen "$zeile" go)")
+             R_GO_PFADE="$R_GO_PFADE
+$(printf '%s' "$zeile" | cut -f5)"
+           done; return 0;;
       n|N) for zeile in "${offen[@]}"; do R_AUSGABE+=("$(status_setzen "$zeile" keep)"); done; return 0;;
       o|O) open -R "$pfad1" 2>/dev/null;;
       s|S|"") for zeile in "${offen[@]}"; do R_AUSGABE+=("$zeile"); done; return 0;;
@@ -570,7 +629,10 @@ befehl_review() {
   info "\n${fett}Durchsicht${aus}  —  ${R_GESAMT} offene $([ "$R_GESAMT" -eq 1 ] && echo Gruppe || echo Gruppen)"
   info "${grau}Einträge desselben Programms sind zusammengefasst.${aus}"
 
-  R_PUFFER=(); R_AUSGABE=(); R_ABBRUCH=0; R_NR=0
+  R_PUFFER=(); R_AUSGABE=(); R_ABBRUCH=0; R_NR=0; R_UEBERDECKT=0
+  # Schon freigegebene Ordner merken: Was darin liegt, wird mitverschoben
+  # und muss nicht noch einmal gefragt werden.
+  R_GO_PFADE="$(awk -F'\t' '$1=="go"{print $5}' "$KANDIDATEN")"
   local letzte="" zeile g
   while IFS= read -r zeile <&3; do
     g="$(printf '%s' "$zeile" | cut -f7)"
@@ -586,10 +648,10 @@ befehl_review() {
   { printf '%s\n' "${R_AUSGABE[@]+"${R_AUSGABE[@]}"}" | grep -v '^$'; cat "$rest"; } \
     | sort -t$'\t' -k2,2 -k3,3nr > "$KANDIDATEN.tmp" && mv "$KANDIDATEN.tmp" "$KANDIDATEN"
 
-  local zumweg
-  zumweg="$(awk -F'\t' '$1=="go"{n++; s+=$3} END{printf "%d Einträge, ", n+0; print s+0}' "$KANDIDATEN")"
-  local n_go="${zumweg%%,*}"
-  local kb_go="${zumweg##* }"
+  local n_go kb_go
+  n_go="$(awk -F'\t' '$1=="go"' "$KANDIDATEN" | wc -l | tr -d ' ') Einträge"
+  kb_go="$(summe_echt go)"
+  [ "$R_UEBERDECKT" -gt 0 ] && info "\n${grau}$R_UEBERDECKT Einträge lagen in bereits freigegebenen Ordnern — nicht erneut gefragt.${aus}"
   if [ "$R_ABBRUCH" -eq 1 ]; then
     info "\nGespeichert. Weiter mit: ${fett}$0 review${kat_filter:+ $kat_filter}${aus}"
   else
@@ -605,24 +667,13 @@ befehl_apply() {
   local anzahl; anzahl="$(awk -F'\t' '$1=="go"' "$KANDIDATEN" | wc -l | tr -d ' ')"
   [ "$anzahl" -eq 0 ] && { warn "Nichts markiert. Erst '$0 review'."; return 0; }
 
-  # Waehrend eines Laufs liegen Original und neue Fassung gleichzeitig da.
-  # Als Puffer die groesste ausgewaehlte Datei plus etwas Luft.
-  local groesste frei
-  groesste="$(awk -F'\t' '$1=="go" && $9+0 > m { m=$9 } END{ print m+0 }' "$VIDEOLISTE")"
-  frei="$(freier_platz_kb "$HOME")"
-  if [ "${frei:-0}" -lt $(( groesste + 1048576 )) ]; then
-    fehler "Zu wenig Platz: $(mb "$frei") frei, mindestens $(mb $((groesste + 1048576))) nötig."
-    info "${grau}Während des Kodierens liegen Original und neue Fassung gleichzeitig auf der Platte.${aus}"
-    return 1
-  fi
-
   local stapel; stapel="$(date '+%Y-%m-%d_%H%M%S')"
   local ziel="$QUARANTAENE/$stapel"
   local manifest="$ziel/_manifest.tsv"
   mkdir -p "$ziel"
   : > "$manifest"
 
-  local platz; platz="$(awk -F'\t' '$1=="go"{s+=$3} END{print s}' "$KANDIDATEN")"
+  local platz; platz="$(summe_echt go)"
   info "\n${fett}$anzahl Einträge${aus} ($(mb "$platz")) → Quarantäne"
   info "${grau}$ziel${aus}\n"
   printf 'Fortfahren? [j/N] '
@@ -634,7 +685,7 @@ befehl_apply() {
   local keepliste="$ARBEIT/apply_keep.txt"
   awk -F'\t' '$1=="keep"{print $5}' "$KANDIDATEN" > "$keepliste"
 
-  local verschoben=0 fehlgeschlagen=0 blockiert=0
+  local verschoben=0 fehlgeschlagen=0 blockiert=0 mitgewandert=0
   local -a neu=()
   while IFS= read -r zeile <&3; do
     local st kt kb mt pfad grund grp etikett
@@ -643,7 +694,11 @@ befehl_apply() {
     if ist_geschuetzt "$pfad"; then
       warn "geschützt, übersprungen: $pfad"; neu+=("$(status_setzen "$zeile" keep)"); continue
     fi
-    if [ ! -e "$pfad" ]; then continue; fi
+    if [ ! -e "$pfad" ]; then
+      # Meist schon mit einem uebergeordneten Ordner mitgewandert
+      mitgewandert=$((mitgewandert + 1))
+      continue
+    fi
     if [ -d "$pfad" ] && awk -v praefix="$pfad/" 'index($0, praefix)==1 { gefunden=1; exit } END { exit !gefunden }' "$keepliste"; then
       local drin
       drin="$(awk -v praefix="$pfad/" 'index($0, praefix)==1 { print; exit }' "$keepliste")"
@@ -672,6 +727,7 @@ befehl_apply() {
 
   schreibe_kandidaten "${neu[@]+"${neu[@]}"}"
   [ "$blockiert" -gt 0 ] && warn "$blockiert übersprungen, weil sie behaltene Unterordner enthalten"
+  [ "$mitgewandert" -gt 0 ] && info "${grau}$mitgewandert Einträge lagen in einem anderen und sind mitgewandert.${aus}"
   if [ "$fehlgeschlagen" -gt 0 ]; then
     info "\n${gruen}$verschoben verschoben${aus}, ${rot}$fehlgeschlagen fehlgeschlagen${aus}"
   else
