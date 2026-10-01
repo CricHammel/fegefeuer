@@ -136,6 +136,13 @@ verschwunden geblieben ist und dir nicht gefehlt hat.
 
 Beide verlangen, dass du `LOESCHEN` tippst.
 
+`purge` misst, was tatsächlich verschwunden ist, statt den Erfolg
+vorauszusetzen. Bleibt etwas liegen, sagt es das und nennt den Grund — meist
+Dateien, die ein Programm mit erhöhten Rechten angelegt hat und die nur mit
+`sudo` zu entfernen sind. Tauchen während des Löschens neue Dateien auf (etwa
+`.DS_Store`), räumt es sie weg und versucht es ein zweites Mal.
+
+
 ### Die Schutzliste
 
 Diese Pfade lehnt `apply` ab, selbst wenn sie als Kandidat markiert sind:

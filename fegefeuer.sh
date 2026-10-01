@@ -684,7 +684,8 @@ befehl_list() {
     [ -d "$s" ] || continue
     local name; name="$(basename "$s")"
     local kb; kb="$(du -sk "$s" 2>/dev/null | cut -f1)"
-    local n; n="$(wc -l < "$s/_manifest.tsv" 2>/dev/null | tr -d ' ')"
+    local n=0
+    [ -f "$s/_manifest.tsv" ] && n="$(wc -l < "$s/_manifest.tsv" 2>/dev/null | tr -d ' ')"
     local tage; tage=$(( ( $(date +%s) - $(stat -f %m "$s") ) / 86400 ))
     printf '  %-22s %8s  %3s Einträge  %s(vor %d Tagen)%s\n' "$name" "$(mb "$kb")" "${n:-0}" "$grau" "$tage" "$aus"
     gesamt=$((gesamt+kb))
@@ -896,8 +897,55 @@ befehl_purge() {
   printf 'Wirklich löschen? Tippe %sLOESCHEN%s: ' "$fett" "$aus"
   local ok; read -r ok || ok=n
   [ "$ok" = "LOESCHEN" ] || { info "Abgebrochen."; return 0; }
-  for s in "${faellig[@]}"; do rm -rf "$s" && info "  gelöscht: $(basename "$s")"; done
-  info "\n$(mb "$kb") freigegeben."
+  local befreit=0 reste=0
+  for s in "${faellig[@]}"; do
+    local vorher; vorher="$(du -sk "$s" 2>/dev/null | cut -f1)"
+    stapel_loeschen "$s"
+    local uebrig=0
+    [ -d "$s" ] && uebrig="$(du -sk "$s" 2>/dev/null | cut -f1)"
+    befreit=$(( befreit + vorher - uebrig ))
+    if [ ! -d "$s" ]; then
+      info "  ${gruen}gelöscht:${aus} $(basename "$s")"
+    else
+      reste=$(( reste + 1 ))
+      warn "unvollständig gelöscht: $(basename "$s") — $(mb "$uebrig") blieben liegen"
+      stapel_reste_erklaeren "$s"
+    fi
+  done
+  info "\n${gruen}$(mb "$befreit") freigegeben.${aus}"
+  [ "$reste" -gt 0 ] && warn "Nicht alles liess sich entfernen — siehe oben."
+  return 0
+}
+
+# Loescht einen Stapel und faengt dabei den haeufigsten Stolperstein ab:
+# Ist der Ordner im Finder geoeffnet, legt dieser waehrend des Loeschens
+# neue .DS_Store-Dateien an, und rmdir scheitert an "Directory not empty".
+stapel_loeschen() {
+  local ziel="$1"
+  rm -rf "$ziel" 2>/dev/null
+  [ -d "$ziel" ] || return 0
+  find "$ziel" -name ".DS_Store" -delete 2>/dev/null
+  rm -rf "$ziel" 2>/dev/null
+  [ -d "$ziel" ] || return 0
+  return 1
+}
+
+# Sagt, was uebrig blieb und warum -- statt den Benutzer mit rm-Meldungen
+# allein zu lassen.
+stapel_reste_erklaeren() {
+  local ziel="$1" fremde
+  fremde="$(find "$ziel" ! -user "$(id -un)" 2>/dev/null | head -1)"
+  if [ -n "$fremde" ]; then
+    local besitzer
+    besitzer="$(ls -ld "$fremde" 2>/dev/null | awk '{print $3}')"
+    info "  ${grau}Diese Dateien gehören ${besitzer:-einem anderen Benutzer}, nicht dir."
+    info "  Ein Programm hat sie mit erhöhten Rechten angelegt. Zum Entfernen:${aus}"
+    info "    ${fett}sudo rm -rf \"$ziel\"${aus}"
+    info "  ${grau}Prüfe den Pfad, bevor du das ausführst.${aus}"
+  else
+    info "  ${grau}Grund unklar. Liegt der Ordner im Finder offen? Dann schliessen"
+    info "  und erneut versuchen:${aus} ${fett}$0 purge 0${aus}"
+  fi
 }
 
 # Eintraege loeschen, deren Originalpfad wieder existiert. Diese Kopien haben
@@ -944,14 +992,21 @@ purge_wieder_da() {
   local ok; read -r ok || ok=n
   [ "$ok" = "LOESCHEN" ] || { info "Abgebrochen."; return 0; }
 
-  local geloescht=0
+  local geloescht=0 wirklich_frei=0
   for sordner in "${stapelliste[@]}"; do
     [ -f "$sordner/_manifest.tsv" ] || continue
     local -a bleibt=()
     while IFS=$'\t' read -r rel original ekb art; do
       [ -n "$rel" ] || continue
       if [ "$art" != "ersetzt" ] && [ -e "$original" ] && [ -e "$sordner/$rel" ]; then
-        rm -rf "$sordner/$rel" && geloescht=$((geloescht+1))
+        local vorher_kb; vorher_kb="$(du -sk "$sordner/$rel" 2>/dev/null | cut -f1)"
+        rm -rf "$sordner/$rel" 2>/dev/null
+        if [ -e "$sordner/$rel" ]; then
+          warn "liess sich nicht löschen: ${original/#$HOME/$TILDE}"
+          bleibt+=("$(printf '%s\t%s\t%s\t%s' "$rel" "$original" "$ekb" "$art")")
+          continue
+        fi
+        geloescht=$((geloescht+1)); wirklich_frei=$((wirklich_frei + vorher_kb))
       else
         bleibt+=("$(printf '%s\t%s\t%s\t%s' "$rel" "$original" "$ekb" "$art")")
       fi
@@ -964,7 +1019,7 @@ purge_wieder_da() {
       info "  Stapel $(basename "$sordner") ist jetzt leer und wurde entfernt."
     fi
   done
-  info "\n${gruen}$geloescht Einträge gelöscht${aus}, $(mb "$kb") freigegeben."
+  info "\n${gruen}$geloescht Einträge gelöscht${aus}, $(mb "$wirklich_frei") freigegeben."
 }
 
 # ---------- mark ----------
