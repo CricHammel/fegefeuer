@@ -92,6 +92,14 @@ fortschritt_ende() { fortschritt_sichtbar && printf '\r\033[K' >&2; return 0; }
 # Tastenbelegung an genau einer Stelle, damit sie am Prompt und in der
 # Fehlermeldung nicht auseinanderlaufen. Sie steht bei jeder Frage -- wer
 # 150 Dubletten durchgeht, soll nicht raten muessen, was gerade moeglich ist.
+# Schreibt die uebergebenen Zeilen in eine Datei -- oder leert sie, wenn keine
+# kommen. printf '%s\n' ohne Argumente schriebe eine Leerzeile.
+# Aufruf mit einem Array unter set -u: zeilen_schreiben <datei> "${a[@]+"${a[@]}"}"
+zeilen_schreiben() {   # zeilen_schreiben <datei> [zeile ...]
+  local datei="$1"; shift
+  if [ "$#" -eq 0 ]; then : > "$datei"; else printf '%s\n' "$@" > "$datei"; fi
+}
+
 TASTEN_ZULETZT=""
 tasten() {   # tasten <einzug> <taste:bedeutung> ...
   local einzug="$1"; shift

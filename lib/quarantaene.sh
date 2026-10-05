@@ -176,20 +176,50 @@ manifest_zeile() { printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "${5:-}"; }
 # benutzt, und die alten Daten sind genau das, was ihr jetzt fehlt.
 nachwachsend() { case "${1:-}" in cache|toolchain) return 0;; esac; return 1; }
 
+# Alle Stapel der Quarantaene, einer je Zeile, mit Schraegstrich am Ende.
+# "ohne-verdraengt" laesst die _verdraengt-Ordner aus, die restore --ersetzen
+# anlegt: Sie haben kein Manifest und gehoeren nicht zu pruefen und
+# purge --wieder-da. list und purge zeigen bzw. loeschen sie mit.
+stapel_auflisten() {   # stapel_auflisten [ohne-verdraengt]
+  local s
+  for s in "$QUARANTAENE"/*/; do
+    [ -d "$s" ] || continue
+    if [ "${1:-}" = "ohne-verdraengt" ]; then
+      case "$(basename "$s")" in _verdraengt-*) continue;; esac
+    fi
+    printf '%s\n' "$s"
+  done
+}
+
+# Alter eines Stapels in Tagen, gemessen an der Aenderungszeit des Ordners
+stapel_alter_tage() { echo $(( ( $(date +%s) - $(stat -f %m "$1") ) / 86400 )); }
+
+# Leere Unterordner entfernen. Ein Durchgang genuegt: -delete arbeitet von
+# innen nach aussen, ein Ordner, der dabei leer wird, faellt gleich mit.
+leere_ordner_entfernen() { find "$1" -mindepth 1 -type d -empty -delete 2>/dev/null; }
+
+# Fragt nach, bevor endgueltig geloescht wird. 0 nur bei getipptem LOESCHEN.
+loeschen_bestaetigen() {
+  printf 'Wirklich löschen? Tippe %sLOESCHEN%s: ' "$fett" "$aus"
+  local ok; read -r ok || ok=n
+  [ "$ok" = "LOESCHEN" ] && return 0
+  info "Abgebrochen."
+  return 1
+}
+
 befehl_list() {
   [ -d "$QUARANTAENE" ] || { info "Quarantäne ist leer."; return 0; }
   titel "Quarantäne"
   local gesamt=0
-  for s in "$QUARANTAENE"/*/; do
-    [ -d "$s" ] || continue
+  while IFS= read -r s; do
     local name; name="$(basename "$s")"
     local kb; kb="$(du -sk "$s" 2>/dev/null | cut -f1)"
     local n=0
     [ -f "$s/_manifest.tsv" ] && n="$(wc -l < "$s/_manifest.tsv" 2>/dev/null | tr -d ' ')"
-    local tage; tage=$(( ( $(date +%s) - $(stat -f %m "$s") ) / 86400 ))
+    local tage; tage="$(stapel_alter_tage "$s")"
     printf '  %-22s %8s  %3s Einträge  %s(vor %d Tagen)%s\n' "$name" "$(mb "$kb")" "${n:-0}" "$grau" "$tage" "$aus"
     gesamt=$((gesamt+kb))
-  done
+  done < <(stapel_auflisten)
   info "\n  Gesamt: $(mb "$gesamt")"
 }
 
@@ -295,10 +325,9 @@ befehl_restore() {
   done 3< "$manifest"
 
   # Manifest auf das reduzieren, was noch in Quarantäne liegt
-  if [ ${#bleibt[@]} -eq 0 ]; then : > "$manifest"; else printf '%s\n' "${bleibt[@]}" > "$manifest"; fi
+  zeilen_schreiben "$manifest" "${bleibt[@]+"${bleibt[@]}"}"
 
-  while find "$ziel" -mindepth 1 -type d -empty -delete 2>/dev/null | grep -q .; do :; done
-  find "$ziel" -mindepth 1 -type d -empty -delete 2>/dev/null
+  leere_ordner_entfernen "$ziel"
 
   info ""
   [ "$n" -gt 0 ]            && info "${gruen}$n zurückgeholt${aus}"
@@ -341,12 +370,10 @@ befehl_pruefen() {
   local gesamt_angelegt=0 kb_angelegt=0
   local stapelordner rel original kb kat name tage
 
-  for stapelordner in "$QUARANTAENE"/*/; do
-    [ -d "$stapelordner" ] || continue
+  while IFS= read -r stapelordner; do
     name="$(basename "$stapelordner")"
-    case "$name" in _verdraengt-*) continue;; esac
     [ -f "$stapelordner/_manifest.tsv" ] || continue
-    tage=$(( ( $(date +%s) - $(stat -f %m "$stapelordner") ) / 86400 ))
+    tage="$(stapel_alter_tage "$stapelordner")"
 
     titel "$name  (vor $tage Tagen)"
     local w=0 f=0 e=0 a=0 wkb=0 fkb=0 ekb=0 akb=0 unbekannt=0 art
@@ -405,7 +432,7 @@ befehl_pruefen() {
     kb_wieder=$((kb_wieder + wkb)); kb_fehlt=$((kb_fehlt + fkb))
     gesamt_ersetzt=$((gesamt_ersetzt + e)); kb_ersetzt=$((kb_ersetzt + ekb))
     gesamt_angelegt=$((gesamt_angelegt + a)); kb_angelegt=$((kb_angelegt + akb))
-  done
+  done < <(stapel_auflisten ohne-verdraengt)
 
   local zusatz=""
   [ "$gesamt_angelegt" -gt 0 ] && zusatz=", $gesamt_angelegt wieder angelegt ($(mb "$kb_angelegt"))"
@@ -423,21 +450,16 @@ befehl_purge() {
   local tage="${1:-7}"
   [ -d "$QUARANTAENE" ] || { info "Quarantäne ist leer."; return 0; }
   local -a faellig=()
-  local s name
-  for s in "$QUARANTAENE"/*/; do
-    [ -d "$s" ] || continue
-    name="$(basename "$s")"
-    local alter=$(( ( $(date +%s) - $(stat -f %m "$s") ) / 86400 ))
-    [ "$alter" -ge "$tage" ] && faellig+=("$s")
-  done
+  local s
+  while IFS= read -r s; do
+    [ "$(stapel_alter_tage "$s")" -ge "$tage" ] && faellig+=("$s")
+  done < <(stapel_auflisten)
   [ ${#faellig[@]} -eq 0 ] && { info "Nichts älter als $tage Tage."; return 0; }
 
   local kb=0
   for s in "${faellig[@]}"; do kb=$(( kb + $(du -sk "$s" 2>/dev/null | cut -f1) )); done
   warn "Endgültiges Löschen von ${#faellig[@]} Stapel(n), $(mb "$kb"). Das lässt sich NICHT rückgängig machen."
-  printf 'Wirklich löschen? Tippe %sLOESCHEN%s: ' "$fett" "$aus"
-  local ok; read -r ok || ok=n
-  [ "$ok" = "LOESCHEN" ] || { info "Abgebrochen."; return 0; }
+  loeschen_bestaetigen || return 0
   local befreit=0 reste=0
   for s in "${faellig[@]}"; do
     local vorher; vorher="$(du -sk "$s" 2>/dev/null | cut -f1)"
@@ -499,13 +521,8 @@ purge_wieder_da() {
     [ -d "$QUARANTAENE/$stapel" ] || { fehler "Stapel '$stapel' nicht gefunden."; return 1; }
     stapelliste=("$QUARANTAENE/$stapel/")
   else
-    local s name
-    for s in "$QUARANTAENE"/*/; do
-      [ -d "$s" ] || continue
-      name="$(basename "$s")"
-      case "$name" in _verdraengt-*) continue;; esac
-      stapelliste+=("$s")
-    done
+    local s
+    while IFS= read -r s; do stapelliste+=("$s"); done < <(stapel_auflisten ohne-verdraengt)
   fi
   [ ${#stapelliste[@]} -eq 0 ] && { info "Quarantäne ist leer."; return 0; }
 
@@ -537,9 +554,7 @@ purge_wieder_da() {
   info "${fett}$gesamt Einträge${aus} ($(mb "$kb")) sind am Originalort wieder vorhanden."
   info "${grau}Das System hat sie neu angelegt — die Quarantänekopien werden nicht mehr gebraucht.${aus}"
   warn "Endgültiges Löschen. Das lässt sich NICHT rückgängig machen."
-  printf 'Wirklich löschen? Tippe %sLOESCHEN%s: ' "$fett" "$aus"
-  local ok; read -r ok || ok=n
-  [ "$ok" = "LOESCHEN" ] || { info "Abgebrochen."; return 0; }
+  loeschen_bestaetigen || return 0
 
   local geloescht=0 wirklich_frei=0
   for sordner in "${stapelliste[@]}"; do
@@ -560,9 +575,8 @@ purge_wieder_da() {
         bleibt+=("$(manifest_zeile "$rel" "$original" "$ekb" "$art" "$kat")")
       fi
     done < "$sordner/_manifest.tsv"
-    if [ ${#bleibt[@]} -eq 0 ]; then : > "$sordner/_manifest.tsv"; else printf '%s\n' "${bleibt[@]}" > "$sordner/_manifest.tsv"; fi
-    while find "$sordner" -mindepth 1 -type d -empty -delete 2>/dev/null | grep -q .; do :; done
-    find "$sordner" -mindepth 1 -type d -empty -delete 2>/dev/null
+    zeilen_schreiben "$sordner/_manifest.tsv" "${bleibt[@]+"${bleibt[@]}"}"
+    leere_ordner_entfernen "$sordner"
     if [ ! -s "$sordner/_manifest.tsv" ]; then
       rm -f "$sordner/_manifest.tsv"; rmdir "$sordner" 2>/dev/null
       info "  Stapel $(basename "$sordner") ist jetzt leer und wurde entfernt."
