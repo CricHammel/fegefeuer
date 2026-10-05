@@ -194,6 +194,16 @@ stapel_auflisten() {   # stapel_auflisten [ohne-verdraengt]
 # Alter eines Stapels in Tagen, gemessen an der Aenderungszeit des Ordners
 stapel_alter_tage() { echo $(( ( $(date +%s) - $(stat -f %m "$1") ) / 86400 )); }
 
+# Statt "vor 0 Tagen" und "vor 1 Tagen". Gezaehlt wird in vollen 24 Stunden,
+# nicht nach Kalendertagen -- "heute" oder "gestern" waeren deshalb falsch.
+vor_tagen() {   # vor_tagen <tage>
+  case "$1" in
+    0) echo "vor weniger als einem Tag";;
+    1) echo "vor 1 Tag";;
+    *) echo "vor $1 Tagen";;
+  esac
+}
+
 # Leere Unterordner entfernen. Ein Durchgang genuegt: -delete arbeitet von
 # innen nach aussen, ein Ordner, der dabei leer wird, faellt gleich mit.
 leere_ordner_entfernen() { find "$1" -mindepth 1 -type d -empty -delete 2>/dev/null; }
@@ -217,7 +227,7 @@ befehl_list() {
     local n=0
     [ -f "$s/_manifest.tsv" ] && n="$(wc -l < "$s/_manifest.tsv" 2>/dev/null | tr -d ' ')"
     local tage; tage="$(stapel_alter_tage "$s")"
-    printf '  %-22s %8s  %3s Einträge  %s(vor %d Tagen)%s\n' "$name" "$(mb "$kb")" "${n:-0}" "$grau" "$tage" "$aus"
+    printf '  %-22s %8s  %3s Einträge  %s(%s)%s\n' "$name" "$(mb "$kb")" "${n:-0}" "$grau" "$(vor_tagen "$tage")" "$aus"
     gesamt=$((gesamt+kb))
   done < <(stapel_auflisten)
   info "\n  Gesamt: $(mb "$gesamt")"
@@ -375,7 +385,7 @@ befehl_pruefen() {
     [ -f "$stapelordner/_manifest.tsv" ] || continue
     tage="$(stapel_alter_tage "$stapelordner")"
 
-    titel "$name  (vor $tage Tagen)"
+    titel "$name  ($(vor_tagen "$tage"))"
     local w=0 f=0 e=0 a=0 wkb=0 fkb=0 ekb=0 akb=0 unbekannt=0 art
     local -a wieder=() angelegt=()
     while IFS=$'\t' read -r rel original kb art kat; do
