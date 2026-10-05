@@ -221,6 +221,29 @@ $pfad"
   done
 }
 
+# Strg-C im review: sichern, was bis dahin entschieden ist, dann beenden.
+# Ohne das ging die ganze Sitzung verloren, weil erst am Ende geschrieben
+# wird. Bash 3.2 bricht ein wartendes read bei einer Falle nicht ab -- die
+# Falle muss deshalb selbst sichern und das Skript beenden.
+# Die Entscheidungen werden ueber Kategorie und Pfad in die unveraenderte
+# Kandidatenliste eingetragen. Alles andere bleibt, wie es war, ganz gleich,
+# an welcher Stelle der Durchsicht der Abbruch kam.
+r_unterbrochen() {
+  trap - INT
+  local entscheidungen="$ARBEIT/review_entscheidungen.tsv"
+  zeilen_schreiben "$entscheidungen" "${R_AUSGABE[@]+"${R_AUSGABE[@]}"}"
+  awk -F'\t' -v OFS='\t' '
+      FILENAME==ARGV[1] { if ($1 != "") status[$2 SUBSEP $5] = $1; next }
+      (($2 SUBSEP $5) in status) { $1 = status[$2 SUBSEP $5] }
+      { print }' "$entscheidungen" "$KANDIDATEN" > "$KANDIDATEN.tmp" \
+    && mv "$KANDIDATEN.tmp" "$KANDIDATEN"
+  rm -f "$entscheidungen"
+  printf '\n'
+  info "Unterbrochen. Was du bis hierher entschieden hast, ist gespeichert."
+  info "Weiter mit: ${fett}$0 review${kat_filter:+ $kat_filter}${aus}"
+  exit 130
+}
+
 befehl_review() {
   [ -f "$KANDIDATEN" ] || { fehler "Keine Kandidaten. Erst '$0 scan' laufen lassen."; return 1; }
   gruppen_sicherstellen
@@ -259,6 +282,7 @@ befehl_review() {
   # und muss nicht noch einmal gefragt werden.
   R_GO_PFADE="$(awk -F'\t' '$1=="go"{print $5}' "$KANDIDATEN")"
   local letzte="" zeile g st kt kb mt pfad grund
+  trap r_unterbrochen INT
   while IFS= read -r zeile <&3; do
     felder_lesen "$zeile" st kt kb mt pfad grund g
     if [ -n "$letzte" ] && [ "$g" != "$letzte" ]; then
@@ -269,6 +293,7 @@ befehl_review() {
     R_PUFFER+=("$zeile")
   done 3< "$sortiert"
   r_gruppe_abschliessen
+  trap - INT
 
   { printf '%s\n' "${R_AUSGABE[@]+"${R_AUSGABE[@]}"}" | grep -v '^$'; cat "$rest"; } \
     | sort -t$'\t' -k2,2 -k3,3nr > "$KANDIDATEN.tmp" && mv "$KANDIDATEN.tmp" "$KANDIDATEN"

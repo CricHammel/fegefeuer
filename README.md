@@ -135,7 +135,8 @@ Node-Versionen mit diesem Namen in eine Zeile.
 Die Tastenbelegung steht bei **jeder** Frage, nicht nur einmal im Kopf — wer
 150 Dubletten durchgeht, soll nicht raten müssen.
 
-`q` unterbricht jederzeit, der Stand bleibt erhalten. Bereits entschiedene
+`q` unterbricht jederzeit, der Stand bleibt erhalten. Strg-C ebenso: Was bis
+dahin entschieden ist, wird gespeichert, bevor das Skript endet. Bereits entschiedene
 Einträge werden nie erneut gefragt, und eine Gruppenantwort überschreibt sie
 nicht.
 
