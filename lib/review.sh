@@ -288,8 +288,15 @@ befehl_review() {
 
 # ---------- mark ----------
 # Sammelentscheidung fuer eine ganze Kategorie, spart Einzelklicks im review.
-befehl_mark() {
-  local kat="${1:-}" status="${2:-}"
+befehl_mark() {   # befehl_mark <kategorie> <go|keep|neu> [--alle]
+  local kat="" status="" alle=0 arg
+  for arg in "$@"; do
+    case "$arg" in
+      --alle) alle=1;;
+      -*) fehler "Unbekannte Option: $arg"; return 1;;
+      *) if [ -z "$kat" ]; then kat="$arg"; else status="$arg"; fi;;
+    esac
+  done
   case "$status" in go|keep|neu) ;; *) fehler "Status muss go, keep oder neu sein."; return 1;; esac
   [ -n "$kat" ] || { fehler "Welche Kategorie? (app-rest, cache, toolchain, gross, dublette)"; return 1; }
   [ -f "$KANDIDATEN" ] || { fehler "Keine Kandidaten."; return 1; }
@@ -299,15 +306,24 @@ befehl_mark() {
     info "  ${fett}$0 review dublette${aus}"
     return 1
   fi
-  local n
-  n="$(awk -F'\t' -v k="$kat" '$2==k' "$KANDIDATEN" | wc -l | tr -d ' ')"
-  [ "$n" -eq 0 ] && { warn "Kategorie '$kat' enthaelt nichts."; return 0; }
-  local platz
-  platz="$(awk -F'\t' -v k="$kat" '$2==k {s+=$3} END{print s+0}' "$KANDIDATEN")"
-  info "Kategorie ${fett}$kat${aus}: $n Eintraege, $(mb "$platz") -> ${fett}$status${aus}"
-  awk -F'\t' -v OFS='\t' -v k="$kat" -v st="$status" '$2==k { $1=st } { print }' \
+  # Einzeln getroffene Entscheidungen bleiben, wie im review: Eine
+  # Sammelantwort wirkt nur auf das, was noch offen ist. "neu" setzt dagegen
+  # alles zurueck -- dafuer ist es da. --alle ueberschreibt auch Entschiedenes.
+  [ "$status" = "neu" ] && alle=1
+  local n n_offen platz
+  read -r n n_offen platz <<< "$(awk -F'\t' -v k="$kat" -v alle="$alle" '
+      $2==k { n++; if (alle || $1=="neu") { m++; s+=$3 } }
+      END { printf "%d\t%d\t%d", n, m, s }' "$KANDIDATEN")"
+  [ "$n" -eq 0 ] && { warn "Kategorie '$kat' enthält nichts."; return 0; }
+  awk -F'\t' -v OFS='\t' -v k="$kat" -v st="$status" -v alle="$alle" \
+    '$2==k && (alle || $1=="neu") { $1=st } { print }' \
     "$KANDIDATEN" > "$KANDIDATEN.tmp" && mv "$KANDIDATEN.tmp" "$KANDIDATEN"
-  info "Gesetzt. Pruefen mit: $0 zeigen $kat"
+  info "Kategorie ${fett}$kat${aus}: $n_offen Einträge, $(mb "$platz") → ${fett}$status${aus}"
+  if [ "$n_offen" -lt "$n" ]; then
+    info "${grau}$((n - n_offen)) schon entschiedene Einträge bleiben, wie sie sind."
+    info "Auch die überschreiben:${aus} ${fett}$0 mark $kat $status --alle${aus}"
+  fi
+  info "Prüfen mit: ${fett}$0 zeigen $kat${aus}"
 }
 
 # ---------- zeigen ----------

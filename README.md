@@ -167,6 +167,11 @@ Für ganze Kategorien geht es auch ohne Einzelfragen:
 ./fegefeuer.sh mark cache go     # dann pauschal freigeben
 ```
 
+`mark` wirkt nur auf Einträge, die noch offen sind — was du schon einzeln
+entschieden hast, bleibt, genau wie bei einer Gruppenantwort im `review`.
+`--alle` überschreibt auch das, `mark cache neu` setzt die ganze Kategorie
+zurück.
+
 ## Fortschritt
 
 Die langen Schritte melden, wie weit sie sind — das Sammeln der Prüfsummen,

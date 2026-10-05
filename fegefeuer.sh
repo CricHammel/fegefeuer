@@ -37,7 +37,9 @@ ${fett}fegefeuer.sh${aus} — Festplatte aufräumen ohne Reue
   ${fett}scan${aus}              Festplatte analysieren, Kandidaten sammeln
   ${fett}review${aus} [kategorie] Kandidaten durchgehen; Einträge desselben Programms
                     werden zu einer Entscheidung zusammengefasst
-  ${fett}mark${aus} <kat> <status> Ganze Kategorie auf go/keep setzen (Sammelentscheidung)
+  ${fett}mark${aus} <kat> <status> Offene Einträge einer Kategorie auf go/keep setzen
+                    ${grau}--alle${aus}  auch schon Entschiedenes überschreiben
+                    ${grau}neu${aus}     setzt die ganze Kategorie zurück
   ${fett}zeigen${aus} [kategorie]  Aktuelle Entscheidungen auflisten
   ${fett}gruppen${aus} [kategorie] Offene Gruppen anzeigen, größte zuerst
   ${fett}apply${aus}             Entschiedenes in die Quarantäne verschieben
@@ -81,7 +83,7 @@ case "${1:-hilfe}" in
   apply) befehl_apply;;
   list) befehl_list;;
   restore) shift; befehl_restore "$@";;
-  mark) befehl_mark "${2:-}" "${3:-}";;
+  mark) shift; befehl_mark "$@";;
   zeigen) befehl_zeigen "${2:-}";;
   gruppen) befehl_gruppen "${2:-}";;
   brew) befehl_brew;;
