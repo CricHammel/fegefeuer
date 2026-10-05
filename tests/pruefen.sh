@@ -311,6 +311,64 @@ test_scan_mit_spotlight() {
     nicht grep -q 'com.example.da' "$D/kandidaten.tsv"
 }
 
+# Pakete -- Apps, virtuelle Maschinen, Projekte -- sind fuer den Finder eine
+# Datei. Eine einzelne Datei daraus zu verschieben beschaedigt das Paket:
+# die Festplatte einer VM als "gross", eine Bibliothek in zwei Apps als
+# "Dublette". scan geht nicht mehr hinein und zeigt grosse Pakete als Ganzes.
+test_scan_paket_als_ganzes() {
+  sandbox
+  local vm="$H/VMs/Windows.utm" a1="$H/Applications/Foo.app" a2="$H/Applications/Bar.app"
+  mkdir -p "$vm/Data" "$a1/Contents/Frameworks" "$a2/Contents/Frameworks" "$H/Dokumente"
+  dd if=/dev/zero of="$vm/Data/disk.img" bs=1m count=210 2>/dev/null
+  head -c 4096 /dev/urandom > "$a1/Contents/Frameworks/lib.dylib"
+  cp "$a1/Contents/Frameworks/lib.dylib" "$a2/Contents/Frameworks/lib.dylib"
+  head -c 4096 /dev/urandom > "$H/Dokumente/x.bin"; cp "$H/Dokumente/x.bin" "$H/Dokumente/y.bin"
+  ff scan --dubletten-ab 1k > /dev/null
+  pruefe "VM erscheint als Ganzes unter gross" \
+    gleich "$(awk -F'\t' -v p="$vm" '$5==p { print $1 "/" $2 }' "$D/kandidaten.tsv")" "neu/gross"
+  pruefe "ihre Festplatte nicht einzeln" nicht grep -q 'disk.img' "$D/kandidaten.tsv"
+  pruefe "keine Dublette aus App-Paketen" nicht grep -q 'lib.dylib' "$D/kandidaten.tsv"
+  pruefe "kleine Pakete erscheinen nicht" nicht grep -q 'Foo.app' "$D/kandidaten.tsv"
+  pruefe "Gegenprobe: Dublette außerhalb gefunden" gleich "$(status_von "$H/Dokumente/x.bin")" neu
+}
+
+# Python-Umgebungen enthalten oft dieselben Bibliotheken. Eine davon zu
+# verschieben macht die Umgebung kaputt -- wie node_modules bleiben sie
+# aus der Dublettensuche heraus.
+test_scan_venv_ohne_dubletten() {
+  sandbox
+  local d1="$H/p1/.venv/lib/python3.12/site-packages/np" d2="$H/p2/venv/lib/python3.12/site-packages/np"
+  local d3="$H/p3/umgebung/lib/python3.12/site-packages/np"
+  mkdir -p "$d1" "$d2" "$d3"
+  head -c 4096 /dev/urandom > "$d1/core.so"; cp "$d1/core.so" "$d2/core.so"; cp "$d1/core.so" "$d3/core.so"
+  ff scan --dubletten-ab 1k > /dev/null
+  pruefe "keine Dublette aus Python-Umgebungen" nicht grep -q 'core.so' "$D/kandidaten.tsv"
+}
+
+# Gegenstueck in apply, fuer Listen aus einem frueheren scan
+test_apply_paketinhalt_geschuetzt() {
+  sandbox
+  local app="$H/Applications/Foo.app" vm="$H/VMs/Alt.utm"
+  mkdir -p "$app/Contents" "$vm/Data"
+  echo x > "$app/Contents/Info.plist"; echo x > "$vm/Data/disk.img"
+  kandidat go gross 300 "$app/Contents/Info.plist"
+  kandidat go gross 300 "$vm"
+  echo j | ff apply > /dev/null
+  pruefe "Datei in einem Paket bleibt" test -f "$app/Contents/Info.plist"
+  pruefe "ein Paket als Ganzes wandert" nicht test -e "$vm"
+}
+
+test_video_scan_ohne_pakete() {
+  sandbox
+  hat_ffmpeg || { ueberspringen "kein ffmpeg"; return 0; }
+  mkdir -p "$H/Film/Urlaub.fcpbundle/Media"
+  rohvideo "$H/Film/Urlaub.fcpbundle/Media/clip.mov"
+  cp "$H/Film/Urlaub.fcpbundle/Media/clip.mov" "$H/Film/einzeln.mov"
+  ff video scan "$H/Film" > /dev/null
+  pruefe "Video außerhalb vermessen" grep -q 'einzeln.mov' "$D/video-kandidaten.tsv"
+  pruefe "Video im Final-Cut-Projekt nicht" nicht grep -q 'fcpbundle' "$D/video-kandidaten.tsv"
+}
+
 # Das Muster */.photoslibrary/* traf nie: Die Mediathek heisst
 # "Photos Library.photoslibrary", vor dem Punkt steht kein Schraegstrich.
 # Mediatheken wurden komplett gehasht, und ausserhalb von ~/Pictures

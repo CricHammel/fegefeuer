@@ -157,17 +157,29 @@ befehl_scan() {
   fi
   info "  fertig"
 
-  titel "4/5  Große Dateien (>200 MB)"
+  titel "4/5  Große Dateien und Pakete (>200 MB)"
   fortschritt_start
-  local n=0 durchsucht=0
+  local n=0 durchsucht=0 paket_kb
+  # Ein Durchlauf fuer beides: Ein Paket (App, VM, Projekt) wird als Ganzes
+  # gemeldet, und -prune verhindert, dass find hineinsteigt -- seine
+  # Einzeldateien zu verschieben beschaedigte es.
+  local -a ausschluss=(! -path "*/.Trash/*" "${MEDIATHEK_AUSSCHLUSS[@]}" "${INTERN_AUSSCHLUSS[@]}"
+                       "${WOLKEN_AUSSCHLUSS[@]}")
   while IFS= read -r -d '' f; do
     durchsucht=$((durchsucht + 1))
     fortschritt_offen "durchsuche … $durchsucht Treffer geprüft"
     ist_geschuetzt "$f" && continue
-    kandidat_schreiben "gross" "$f" "große Einzeldatei — bitte einzeln prüfen"
+    if [ -d "$f" ]; then
+      paket_kb="$(du -sk -x "$f" 2>/dev/null | cut -f1)"
+      [ "${paket_kb:-0}" -gt 204800 ] || continue
+      kandidat_schreiben "gross" "$f" "großes Paket (App, VM, Projekt) — nur als Ganzes verschiebbar"
+    else
+      kandidat_schreiben "gross" "$f" "große Einzeldatei — bitte einzeln prüfen"
+    fi
     n=$((n+1))
-  done < <(find "$HOME" -type f -size +200M ! -path "*/.Trash/*" \
-             "${MEDIATHEK_AUSSCHLUSS[@]}" "${INTERN_AUSSCHLUSS[@]}" "${WOLKEN_AUSSCHLUSS[@]}" -print0 2>/dev/null)
+  done < <(find "$HOME" "${ausschluss[@]}" \
+             \( -type d \( "${PAKET_NAMEN[@]}" \) -print0 -prune \
+                -o -type f -size +200M -print0 \) 2>/dev/null)
   fortschritt_ende
   info "  ${fett}$n${aus} gefunden"
 
@@ -183,6 +195,7 @@ befehl_scan() {
     ! -path "$HOME/Library/*" ! -path "*/.Trash/*" ! -path "*/node_modules/*" \
     ! -path "*/.git/*" ! -path "*/.nvm/*" ! -path "*/.pyenv/*" ! -path "*/.m2/*" \
     ! -path "*/.cargo/*" "${MEDIATHEK_AUSSCHLUSS[@]}" "${INTERN_AUSSCHLUSS[@]}" "${WOLKEN_AUSSCHLUSS[@]}" \
+    "${PAKET_AUSSCHLUSS[@]}" "${UMGEBUNG_AUSSCHLUSS[@]}" \
     -print0 2>/dev/null > "$dateiliste"
   local zu_hashen
   zu_hashen="$(tr -dc '\0' < "$dateiliste" | wc -c | tr -d ' ')"

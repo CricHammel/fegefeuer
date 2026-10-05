@@ -34,6 +34,8 @@ ist_geschuetzt() {
     "$HOME"/*.7z|\
     "$HOME") return 0;;
   esac
+  # Nie etwas aus einem Paket heraus -- das Paket selbst darf wandern
+  liegt_in_paket "$p" && return 0
   # Nie außerhalb des Home löschen
   case "$p" in
     "$HOME"/*) ;;
@@ -55,6 +57,41 @@ INTERN_AUSSCHLUSS=(! -path "$HOME/.fegefeuer/*" ! -path "$HOME/.aufraeumen-quara
 # nur in ~/Pictures.
 # Gegenstueck zum photoslibrary-Eintrag in ist_geschuetzt.
 MEDIATHEK_AUSSCHLUSS=(! -path "*.photoslibrary/*")
+
+# ---------- Pakete ----------
+# Apps, virtuelle Maschinen und Projekte sind Ordner, die der Finder als eine
+# Datei zeigt. Eine einzelne Datei daraus zu verschieben beschaedigt das
+# Paket: die Festplatte einer VM als "gross", eine Bibliothek, die zwei Apps
+# gleich mitbringen, als "Dublette". Die Scans gehen nicht hinein; grosse
+# Pakete zeigt scan als Ganzes. Foto-Mediatheken sind auch Pakete, aber
+# ganz geschuetzt (siehe oben).
+PAKET_ENDUNGEN=(app pvm utm vmwarevm fcpbundle logicx band imovielibrary musiclibrary
+                sparsebundle xcarchive)
+
+# Daraus gebildet, damit die Liste nur an einer Stelle steht:
+#   PAKET_AUSSCHLUSS  find-Tests, die nichts innerhalb eines Pakets durchlassen
+#   PAKET_NAMEN       find-Ausdruck, der die Pakete selbst trifft (in \( \))
+PAKET_AUSSCHLUSS=()
+PAKET_NAMEN=()
+for _endung in "${PAKET_ENDUNGEN[@]}"; do
+  PAKET_AUSSCHLUSS+=(! -path "*.$_endung/*")
+  [ ${#PAKET_NAMEN[@]} -gt 0 ] && PAKET_NAMEN+=(-o)
+  PAKET_NAMEN+=(-name "*.$_endung")
+done
+unset _endung
+
+liegt_in_paket() {   # liegt_in_paket <pfad>
+  local e
+  for e in "${PAKET_ENDUNGEN[@]}"; do
+    case "$1" in *."$e"/*) return 0;; esac
+  done
+  return 1
+}
+
+# Python-Umgebungen: oft dieselben Bibliotheken in jedem Projekt. Eine davon
+# zu verschieben macht die Umgebung kaputt. Nur fuer die Dublettensuche --
+# grosse Dateien darin (Modelle etwa) bleiben sichtbar.
+UMGEBUNG_AUSSCHLUSS=(! -path "*/venv/*" ! -path "*/.venv/*" ! -path "*/site-packages/*")
 
 # Cloud-Ordner gehoeren nicht nur diesem Rechner: Was hier verschwindet,
 # verschwindet auf dem Server, bei geteilten Ordnern fuer alle. Die Scans

@@ -42,7 +42,7 @@ Beim Start prüft das Skript, ob es auf macOS läuft und ob alles Nötige da ist
 | `app-rest` | Ordner in `~/Library`, zu denen keine installierte App mehr existiert |
 | `cache` | Caches, die sich selbst neu aufbauen |
 | `toolchain` | alte Node-Versionen, veraltete Playwright-Browser |
-| `gross` | Einzeldateien über 200 MB |
+| `gross` | Einzeldateien und Pakete (Apps, VMs, Projekte) über 200 MB |
 | `dublette` | inhaltsgleiche Dateien (SHA-1, Mindestgröße einstellbar) |
 
 Ob eine App noch installiert ist, entscheidet nicht der Ordnername, sondern
@@ -287,7 +287,30 @@ Diese Pfade lehnt `apply` ab, selbst wenn sie als Kandidat markiert sind:
 - `~/*.7z`
 - `~/.fegefeuer` und das Arbeitsverzeichnis `.arbeit` — fegefeuer findet sich
   nicht selbst
+- alles **innerhalb** eines Pakets (siehe unten) — das Paket selbst darf
+  als Ganzes wandern
 - alles außerhalb von `~`
+
+### Pakete
+
+Apps, virtuelle Maschinen und Projekte sind Ordner, die der Finder als eine
+Datei zeigt: `.app`, `.pvm`, `.utm`, `.vmwarevm`, `.fcpbundle`, `.logicx`,
+`.band`, `.imovielibrary`, `.musiclibrary`, `.sparsebundle`, `.xcarchive`.
+Eine einzelne Datei daraus zu verschieben beschädigt das Paket — die
+Festplatte einer VM als „große Datei“, eine Bibliothek, die zwei Apps gleich
+mitbringen, als Dublette, ein Clip aus einem Final-Cut-Projekt als Video zum
+Neukodieren. Keine der Suchen geht deshalb hinein. Ist ein Paket über 200 MB,
+zeigt `scan` es als Ganzes unter `gross`; eine vergessene VM mit 60 GB soll
+schließlich auffallen.
+
+Die Liste steht in `lib/schutz.sh` (`PAKET_ENDUNGEN`). Foto-Mediatheken sind
+auch Pakete, stehen aber ganz unter Schutz.
+
+Aus demselben Grund lässt die Dublettensuche Python-Umgebungen aus (`venv`,
+`.venv`, `site-packages`), wie schon `node_modules`. Große Dateien darin,
+etwa Modelle, erscheinen weiter unter `gross`.
+
+### Woher die Einträge stammen
 
 Die zwei wichtigsten Einträge kamen aus Beinahe-Unfällen. Der Dublettensucher
 meldete 2,44 GB doppelte Dateien in einem OneDrive-Ordner — lokal gelöscht
