@@ -65,10 +65,18 @@ MEDIATHEK_AUSSCHLUSS=(! -path "*.photoslibrary/*")
 # gleich mitbringen, als "Dublette". Die Scans gehen nicht hinein; grosse
 # Pakete zeigt scan als Ganzes. Foto-Mediatheken sind auch Pakete, aber
 # ganz geschuetzt (siehe oben).
+# "git" trifft .git im Projekt wie ein nacktes Repository projekt.git: Eine
+# einzelne Packdatei daraus zu verschieben macht den Verlauf unlesbar.
 PAKET_ENDUNGEN=(app pvm utm vmwarevm fcpbundle logicx band imovielibrary musiclibrary
-                sparsebundle xcarchive)
+                sparsebundle xcarchive git)
 
-# Daraus gebildet, damit die Liste nur an einer Stelle steht:
+# Pakete ohne eigene Endung, erkannt am Ort: Jeder Ordner darunter ist ein
+# Paket. Geraete-Backups sind Tausende Dateien mit Hash-Namen -- eine davon
+# fehlt, und das Backup laesst sich nicht mehr zurueckspielen. Ein altes
+# Backup als Ganzes ist dagegen oft der groesste Brocken ueberhaupt.
+PAKET_ORTE=("*/Library/Application Support/MobileSync/Backup")
+
+# Daraus gebildet, damit die Listen nur an einer Stelle stehen:
 #   PAKET_AUSSCHLUSS  find-Tests, die nichts innerhalb eines Pakets durchlassen
 #   PAKET_NAMEN       find-Ausdruck, der die Pakete selbst trifft (in \( \))
 PAKET_AUSSCHLUSS=()
@@ -78,14 +86,34 @@ for _endung in "${PAKET_ENDUNGEN[@]}"; do
   [ ${#PAKET_NAMEN[@]} -gt 0 ] && PAKET_NAMEN+=(-o)
   PAKET_NAMEN+=(-name "*.$_endung")
 done
-unset _endung
+for _ort in "${PAKET_ORTE[@]}"; do
+  PAKET_AUSSCHLUSS+=(! -path "$_ort/*/*")
+  PAKET_NAMEN+=(-o -path "$_ort/*")
+done
+unset _endung _ort
 
 liegt_in_paket() {   # liegt_in_paket <pfad>
-  local e
+  local e o
   for e in "${PAKET_ENDUNGEN[@]}"; do
     case "$1" in *."$e"/*) return 0;; esac
   done
+  for o in "${PAKET_ORTE[@]}"; do
+    # $o unquotiert: es ist selbst ein Muster
+    # shellcheck disable=SC2254
+    case "$1" in $o/*/*) return 0;; esac
+  done
   return 1
+}
+
+# Wie scan ein grosses Paket beschreibt
+paket_art() {   # paket_art <pfad>
+  local o
+  case "$1" in *.git) echo "Git-Repository samt Verlauf"; return;; esac
+  for o in "${PAKET_ORTE[@]}"; do
+    # shellcheck disable=SC2254
+    case "$1" in $o/*) echo "Geräte-Backup (iPhone, iPad)"; return;; esac
+  done
+  echo "großes Paket (App, VM, Projekt)"
 }
 
 # Python-Umgebungen: oft dieselben Bibliotheken in jedem Projekt. Eine davon

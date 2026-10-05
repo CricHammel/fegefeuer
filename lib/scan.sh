@@ -208,7 +208,7 @@ befehl_scan() {
     if [ -d "$f" ]; then
       paket_kb="$(du -sk -x "$f" 2>/dev/null | cut -f1)"
       [ "${paket_kb:-0}" -gt 204800 ] || continue
-      kandidat_schreiben "gross" "$f" "großes Paket (App, VM, Projekt) — nur als Ganzes verschiebbar"
+      kandidat_schreiben "gross" "$f" "$(paket_art "$f") — nur als Ganzes verschiebbar"
     else
       kandidat_schreiben "gross" "$f" "große Einzeldatei — bitte einzeln prüfen"
     fi

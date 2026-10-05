@@ -309,8 +309,17 @@ Neukodieren. Keine der Suchen geht deshalb hinein. Ist ein Paket über 200 MB,
 zeigt `scan` es als Ganzes unter `gross`; eine vergessene VM mit 60 GB soll
 schließlich auffallen.
 
-Die Liste steht in `lib/schutz.sh` (`PAKET_ENDUNGEN`). Foto-Mediatheken sind
-auch Pakete, stehen aber ganz unter Schutz.
+Dasselbe gilt für zwei Arten von Ordnern, die der Finder nicht als Paket
+zeigt: **Git-Repositories** (`.git` im Projekt wie ein nacktes `projekt.git`)
+und **Geräte-Backups** unter `~/Library/Application Support/MobileSync/Backup`.
+Eine einzelne Packdatei aus `.git/objects/pack` macht den Verlauf unlesbar,
+eine einzelne der Tausenden Hash-Dateien eines iPhone-Backups das ganze
+Backup unbrauchbar. Früher erschienen beide unter `gross`, sobald eine Datei
+darin über 200 MB lag. Jetzt zeigt `scan` das Repository oder das Backup als
+Ganzes. Ein altes iPhone-Backup ist oft der größte Brocken auf der Platte.
+
+Die Listen stehen in `lib/schutz.sh` (`PAKET_ENDUNGEN`, `PAKET_ORTE`).
+Foto-Mediatheken sind auch Pakete, stehen aber ganz unter Schutz.
 
 Aus demselben Grund lässt die Dublettensuche Python-Umgebungen aus (`venv`,
 `.venv`, `site-packages`), wie schon `node_modules`. Große Dateien darin,

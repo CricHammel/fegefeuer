@@ -617,6 +617,35 @@ test_video_schaetzung_hochkant() {
   pruefe "hochkant und quer werden gleich geschätzt" gleich "$hoch" "$quer"
 }
 
+# Pakete ohne eigene Endung: Git-Repositories und Geraete-Backups. Eine
+# einzelne Packdatei oder Backup-Datei zu verschieben macht das Ganze kaputt.
+test_scan_git_und_backup_als_ganzes() {
+  sandbox
+  local git="$H/Projekt/.git" bak="$H/Library/Application Support/MobileSync/Backup/0000-ABC"
+  mkdir -p "$git/objects/pack" "$bak/3f"
+  dd if=/dev/zero of="$git/objects/pack/pack-abc.pack" bs=1m count=210 2>/dev/null
+  dd if=/dev/zero of="$bak/3f/3f9a1c" bs=1m count=210 2>/dev/null
+  ff scan > /dev/null
+  pruefe "keine Packdatei einzeln" nicht grep -q 'pack-abc.pack' "$D/kandidaten.tsv"
+  pruefe "keine Backup-Datei einzeln" nicht grep -q '3f9a1c' "$D/kandidaten.tsv"
+  pruefe "Repository als Ganzes unter gross" gleich "$(status_von "$git")" neu
+  pruefe "Backup als Ganzes unter gross" gleich "$(status_von "$bak")" neu
+}
+
+# Gegenstueck in apply, fuer Listen aus einem frueheren scan
+test_apply_git_und_backup_inhalt_geschuetzt() {
+  sandbox
+  local pack="$H/Projekt/.git/objects/pack/pack-abc.pack"
+  local datei="$H/Library/Application Support/MobileSync/Backup/0000-ABC/3f/3f9a1c"
+  mkdir -p "$(dirname "$pack")" "$(dirname "$datei")"
+  echo x > "$pack"; echo x > "$datei"
+  kandidat go gross 300 "$pack"
+  kandidat go gross 300 "$datei"
+  echo j | ff apply > /dev/null
+  pruefe "Packdatei bleibt" test -f "$pack"
+  pruefe "Backup-Datei bleibt" test -f "$datei"
+}
+
 # ---------- Ablauf ----------
 
 filter="${1:-}"
