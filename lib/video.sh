@@ -689,6 +689,11 @@ befehl_video_run() {
       printf '  %s✗%s Original liess sich nicht sichern\n' "$rot" "$aus"
       misslungen=$((misslungen+1)); rm -f "$neu"; rm -rf "$tmpdir/aus"; continue
     fi
+    # Sofort ins Manifest, nicht erst, wenn auch die neue Fassung liegt: Endet
+    # das Skript dazwischen, laege das Original sonst ohne Eintrag im Stapel --
+    # restore faende es nicht, und purge loeschte es. "ersetzt" ist dabei der
+    # vorsichtige Vermerk: purge --wieder-da laesst solche Eintraege aus.
+    manifest_zeile "$rel" "$pfad" "$kb" "ersetzt" "video" >> "$manifest"
     local zielname="${pfad%.zip}"
     zielname="${zielname%.*}.mp4"
     # Aus film.mov wird film.mp4 -- das darf keine fremde Datei ueberschreiben.
@@ -705,6 +710,8 @@ befehl_video_run() {
       # am Ende geloescht wird -- und purge loeschte es nach sieben Tagen.
       printf '  %s✗%s neue Fassung liess sich nicht ablegen\n' "$rot" "$aus"
       misslungen=$((misslungen+1)); rm -f "$neu"; rm -rf "$tmpdir/aus"
+      # Die Manifestzeile von oben stimmt dann nicht mehr: Ersetzt wurde nichts.
+      sed -i '' '$d' "$manifest"
       if ! mv "$ziel/$rel" "$pfad" 2>/dev/null; then
         # Dann wenigstens so vermerkt, dass restore es findet
         manifest_zeile "$rel" "$pfad" "$kb" "verschoben" "video" >> "$manifest"
@@ -713,10 +720,6 @@ befehl_video_run() {
       continue
     fi
     rm -rf "$tmpdir/aus"
-    # Erst jetzt ins Manifest: Nicht bloss beiseitegelegt, sondern durch eine
-    # neu kodierte Fassung ersetzt. pruefen und purge muessen das
-    # auseinanderhalten.
-    manifest_zeile "$rel" "$pfad" "$kb" "ersetzt" "video" >> "$manifest"
 
     local neu_kb; neu_kb="$(du -sk "$zielname" 2>/dev/null | cut -f1)"
     gespart=$(( gespart + kb - neu_kb ))
@@ -730,7 +733,9 @@ befehl_video_run() {
   done 3< "$VIDEOLISTE"
 
   rm -rf "$tmpdir"
-  [ -s "$manifest" ] || { rm -f "$manifest"; rmdir "$ziel" 2>/dev/null; }
+  # Leere Unterordner bleiben, wenn ein Original zurueckgelegt wurde -- ohne
+  # sie wegzuraeumen scheiterte rmdir, und ein leerer Stapel blieb liegen.
+  [ -s "$manifest" ] || { rm -f "$manifest"; leere_ordner_entfernen "$ziel"; rmdir "$ziel" 2>/dev/null; }
 
   info "\n${gruen}$fertig neu kodiert${aus}, $(mb "$gespart") gespart"
   [ "$misslungen" -gt 0 ] && warn "$misslungen fehlgeschlagen — die Originale liegen unverändert an ihrem Platz"

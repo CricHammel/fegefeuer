@@ -646,6 +646,56 @@ test_apply_git_und_backup_inhalt_geschuetzt() {
   pruefe "Backup-Datei bleibt" test -f "$datei"
 }
 
+# Das Original wanderte ins Fegefeuer, die Manifestzeile kam aber erst, als
+# auch die neue Fassung lag. Endete das Skript dazwischen, lag das Original
+# ohne Eintrag im Stapel: restore fand es nicht, purge loeschte es.
+# Ein mv, das beim Ablegen der neuen Fassung das Skript beendet, stellt das nach.
+test_video_run_abbruch_nach_sicherung() {
+  sandbox
+  hat_ffmpeg || { ueberspringen "kein ffmpeg"; return 0; }
+  mkdir -p "$H/Film"
+  testvideo "$H/Film/a.mp4"
+  video_freigeben "$H/Film/a.mp4"
+  local bin="$WURZEL/$aktuell/bin"
+  mkdir -p "$bin"
+  cat > "$bin/mv" <<'MV'
+#!/bin/bash
+case "$1" in */video_arbeit/neu.mp4) kill -9 "$PPID"; exit 1;; esac
+exec /bin/mv "$@"
+MV
+  chmod +x "$bin/mv"
+  # Die Meldung der Shell ueber den beendeten Prozess ist hier gewollt
+  { echo j | PATH="$bin:$PATH" ff video run --profil sparsam; } > /dev/null 2>&1
+  local s; s="$(stapel)"
+  pruefe "Original liegt im Stapel" test -f "$Q/$s/Film/a.mp4"
+  pruefe "und steht im Manifest" grep -q "$H/Film/a.mp4" "$Q/$s/_manifest.tsv"
+  ff restore "$s" > /dev/null
+  pruefe "restore bringt es zurück" test -f "$H/Film/a.mp4"
+}
+
+# Gegenprobe zum frueh geschriebenen Manifest: Laesst sich die neue Fassung
+# nicht ablegen, kommt das Original zurueck -- und sein Eintrag muss wieder
+# verschwinden, sonst stuende ein "ersetzt" ohne Datei im Stapel.
+test_video_run_ablegen_misslingt() {
+  sandbox
+  hat_ffmpeg || { ueberspringen "kein ffmpeg"; return 0; }
+  mkdir -p "$H/Film"
+  testvideo "$H/Film/a.mp4"
+  video_freigeben "$H/Film/a.mp4"
+  local bin="$WURZEL/$aktuell/bin"
+  mkdir -p "$bin"
+  cat > "$bin/mv" <<'MV'
+#!/bin/bash
+case "$1" in */video_arbeit/neu.mp4) exit 1;; esac
+exec /bin/mv "$@"
+MV
+  chmod +x "$bin/mv"
+  local ausgabe; ausgabe="$(echo j | PATH="$bin:$PATH" ff video run --profil sparsam)"
+  pruefe "meldet den Fehler" enthaelt "$ausgabe" "neue Fassung liess sich nicht ablegen"
+  pruefe "Original wieder am Platz" test -f "$H/Film/a.mp4"
+  pruefe "kein Stapel übrig" gleich "$(stapel)" ""
+}
+
 # ---------- Ablauf ----------
 
 filter="${1:-}"
