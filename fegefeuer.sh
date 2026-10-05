@@ -406,9 +406,12 @@ befehl_scan() {
   if [ -s "$KANDIDATEN" ]; then
     # FILENAME statt NR==FNR: bei leerer erster Datei wuerde NR==FNR auf jede
     # Zeile der zweiten zutreffen und den gesamten neuen Scan verschlucken.
+    # Schluessel ist Kategorie und Pfad: Eine grosse Datei steht oft zugleich
+    # als Dublette in der Liste, und die Entscheidung der einen Zeile darf
+    # nicht auf die andere ueberspringen.
     awk -F'\t' -v OFS='\t' '
-        FILENAME==ARGV[1] { if ($1!="neu") status[$5]=$1; next }
-        { if ($5 in status) $1=status[$5]; print }' \
+        FILENAME==ARGV[1] { if ($1!="neu") status[$2 SUBSEP $5]=$1; next }
+        { if (($2 SUBSEP $5) in status) $1=status[$2 SUBSEP $5]; print }' \
         "$KANDIDATEN" "$KANDIDATEN.tmp" > "$KANDIDATEN.neu"
     mv "$KANDIDATEN.neu" "$KANDIDATEN"
     rm -f "$KANDIDATEN.tmp"
@@ -799,7 +802,50 @@ befehl_apply() {
   local keepliste="$ARBEIT/apply_keep.txt"
   awk -F'\t' '$1=="keep"{print $5}' "$KANDIDATEN" > "$keepliste"
 
-  local verschoben=0 fehlgeschlagen=0 blockiert=0 mitgewandert=0
+  # Von jeder Dubletten-Gruppe muss eine Kopie bleiben. Das review stellt das
+  # sicher, aber nicht allein: Eine grosse Datei steht zugleich als "gross" in
+  # der Liste, und "mark gross go" schickt dann auch die behaltene Kopie los.
+  # Darum hier noch einmal fuer alle Zeilen zusammen. Eine Kopie bleibt, wenn
+  # sie existiert und behalten wird -- oder weder selbst freigegeben ist noch
+  # in einem freigegebenen Ordner liegt. Bleibt keine, wird die ganze Gruppe
+  # nicht angefasst: Ihre Pfade landen in dub_schutz.
+  local dub_schutz="$ARBEIT/apply_dub_schutz.tsv"
+  local vorhanden="$ARBEIT/apply_dub_vorhanden.txt"
+  local p
+  awk -F'\t' '$2=="dublette"{print $5}' "$KANDIDATEN" | while IFS= read -r p; do
+    [ -e "$p" ] && printf '%s\n' "$p"
+  done > "$vorhanden"
+  LC_ALL=C awk -F'\t' '
+    NR==FNR {
+      if ($1=="go")   { gehen[$5]=1; go[++n]=$5 }
+      if ($1=="keep") bleib[$5]=1
+      if ($2=="dublette" && $7!="") { pfad[++m]=$5; gruppe[m]=$7 }
+      next
+    }
+    { da[$0]=1 }
+    END {
+      for (j=1; j<=m; j++) {
+        g=gruppe[j]; q=pfad[j]
+        mitglieder[g] = mitglieder[g] "\n" q
+        if (!(q in da)) continue
+        vorh[g]++
+        if (q in bleib) { rest[g]++; continue }
+        if (q in gehen) continue
+        drin=0
+        for (i=1; i<=n; i++) if (index(q, go[i] "/")==1) { drin=1; break }
+        if (!drin) rest[g]++
+      }
+      for (g in mitglieder) if (vorh[g]>0 && rest[g]+0==0) {
+        k=split(mitglieder[g], t, "\n")
+        for (i=2; i<=k; i++) print g "\t" t[i]
+      }
+    }' "$KANDIDATEN" "$vorhanden" > "$dub_schutz"
+  # Was nicht mitwandern darf: Behaltenes und die Kopien geschuetzter Gruppen
+  local bleibliste="$ARBEIT/apply_bleibt.txt"
+  { cat "$keepliste"; cut -f2 "$dub_schutz"; } > "$bleibliste"
+
+  local verschoben=0 fehlgeschlagen=0 blockiert=0 mitgewandert=0 widerspruch=0 dub_gehalten=0
+  local dub_gemeldet=""
   local -a neu=()
   while IFS= read -r zeile <&3; do
     local st kt kb mt pfad grund grp etikett
@@ -808,17 +854,46 @@ befehl_apply() {
     if ist_geschuetzt "$pfad"; then
       warn "geschützt, übersprungen: $pfad"; neu+=("$(status_setzen "$zeile" keep)"); continue
     fi
+    # Derselbe Pfad steht anderswo auf keep: behalten gewinnt
+    if grep -Fxq -- "$pfad" "$keepliste"; then
+      warn "bleibt: ${pfad/#$HOME/$TILDE}"
+      info "  ${grau}hier als $kt freigegeben, an anderer Stelle der Liste aber behalten.${aus}"
+      widerspruch=$((widerspruch + 1))
+      neu+=("$(status_setzen "$zeile" keep)")
+      continue
+    fi
+    local schutzgruppe
+    schutzgruppe="$(awk -F'\t' -v p="$pfad" '$2==p { print $1; exit }' "$dub_schutz")"
+    if [ -n "$schutzgruppe" ]; then
+      case "$dub_gemeldet" in
+        *"|$schutzgruppe|"*) ;;
+        *)
+          dub_gemeldet="$dub_gemeldet|$schutzgruppe|"
+          warn "Dubletten-Gruppe nicht angefasst — sonst bliebe keine Kopie übrig:"
+          awk -F'\t' -v g="$schutzgruppe" '$1==g { print $2 }' "$dub_schutz" \
+            | while IFS= read -r p; do info "  ${grau}${p/#$HOME/$TILDE}${aus}"; done
+          info "  ${grau}Neu entscheiden mit:${aus} ${fett}$0 review dublette${aus}";;
+      esac
+      dub_gehalten=$((dub_gehalten + 1))
+      # Die Dubletten-Zeile wird wieder offen, damit das review neu fragt
+      if [ "$kt" = "dublette" ]; then neu+=("$(status_setzen "$zeile" neu)"); else neu+=("$zeile"); fi
+      continue
+    fi
     if [ ! -e "$pfad" ]; then
       # Meist schon mit einem uebergeordneten Ordner mitgewandert
       mitgewandert=$((mitgewandert + 1))
       continue
     fi
-    if [ -d "$pfad" ] && awk -v praefix="$pfad/" 'index($0, praefix)==1 { gefunden=1; exit } END { exit !gefunden }' "$keepliste"; then
-      local drin
-      drin="$(awk -v praefix="$pfad/" 'index($0, praefix)==1 { print; exit }' "$keepliste")"
+    local drin=""
+    [ -d "$pfad" ] && drin="$(awk -v praefix="$pfad/" 'index($0, praefix)==1 { print; exit }' "$bleibliste")"
+    if [ -n "$drin" ]; then
       warn "übersprungen: ${pfad/#$HOME/$TILDE}"
-      info "  ${grau}enthält ${drin/#$HOME/$TILDE}, das du behalten wolltest.${aus}"
-      info "  ${grau}Entweder den Unterordner auch freigeben oder den Elternordner behalten.${aus}"
+      if grep -Fxq -- "$drin" "$keepliste"; then
+        info "  ${grau}enthält ${drin/#$HOME/$TILDE}, das du behalten wolltest.${aus}"
+        info "  ${grau}Entweder den Unterordner auch freigeben oder den Elternordner behalten.${aus}"
+      else
+        info "  ${grau}enthält ${drin/#$HOME/$TILDE}, die letzte verbliebene Kopie einer Dublette.${aus}"
+      fi
       blockiert=$((blockiert + 1))
       neu+=("$zeile")
       continue
@@ -838,7 +913,9 @@ befehl_apply() {
   done 3< "$KANDIDATEN"
 
   schreibe_kandidaten "${neu[@]+"${neu[@]}"}"
-  [ "$blockiert" -gt 0 ] && warn "$blockiert übersprungen, weil sie behaltene Unterordner enthalten"
+  [ "$blockiert" -gt 0 ] && warn "$blockiert übersprungen, weil sie Behaltenes enthalten"
+  [ "$widerspruch" -gt 0 ] && warn "$widerspruch Einträge waren zugleich freigegeben und behalten — sie bleiben"
+  [ "$dub_gehalten" -gt 0 ] && warn "$dub_gehalten Dubletten-Einträge nicht angefasst, damit von jeder Gruppe eine Kopie bleibt"
   [ "$mitgewandert" -gt 0 ] && info "${grau}$mitgewandert Einträge lagen in einem anderen und sind mitgewandert.${aus}"
   if [ "$fehlgeschlagen" -gt 0 ]; then
     info "\n${gruen}$verschoben verschoben${aus}, ${rot}$fehlgeschlagen fehlgeschlagen${aus}"

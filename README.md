@@ -85,6 +85,19 @@ Entscheiden musst du. Einen Griff, der alle löscht, gibt es hier nicht: Eine
 Zahl behält genau diese Datei, `n` behält alle. Aus demselben Grund verweigert
 `mark dublette go` den Dienst.
 
+`apply` prüft das noch einmal über die ganze Liste. Eine Datei über 200 MB
+steht oft zweimal darin, als Dublette und als `gross`, und `mark gross go`
+würde sonst auch die behaltene Kopie losschicken. Deshalb gilt:
+
+- Steht ein Pfad irgendwo auf „behalten“, bleibt er — egal, was eine andere
+  Zeile zu ihm sagt.
+- Bliebe von einer Gruppe keine Kopie übrig, wird keine davon angefasst, auch
+  kein Ordner, der eine von ihnen enthält. Die Gruppe ist danach im `review`
+  wieder offen.
+- Beim erneuten Scan werden Entscheidungen je Kategorie und Pfad übernommen,
+  nicht nur je Pfad. Sonst spränge die Antwort von der einen Zeile auf die
+  andere.
+
 Früher bestimmte die Sortierung, welche Datei als Original galt. Bei
 `Datei`/`Datei2` traf das zufällig zu, bei `Kopie von X` neben `X` hätte es
 genau die falsche behalten.
