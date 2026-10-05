@@ -433,7 +433,7 @@ befehl_video_review() {
         o|O) open -R "$pfad" 2>/dev/null;;
         s|S|"") ausgabe+=("$zeile"); break;;
         q|Q) abbruch=1; ausgabe+=("$zeile"); break;;
-        *) printf '  %sBitte j / n / a / o / s / q%s\n' "$gelb" "$aus";;
+        *) tasten_bitte '  ';;
       esac
     done
   done 3< "$VIDEOLISTE"

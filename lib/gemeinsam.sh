@@ -92,12 +92,22 @@ fortschritt_ende() { fortschritt_sichtbar && printf '\r\033[K' >&2; return 0; }
 # Tastenbelegung an genau einer Stelle, damit sie am Prompt und in der
 # Fehlermeldung nicht auseinanderlaufen. Sie steht bei jeder Frage -- wer
 # 150 Dubletten durchgeht, soll nicht raten muessen, was gerade moeglich ist.
+TASTEN_ZULETZT=""
 tasten() {   # tasten <einzug> <taste:bedeutung> ...
   local einzug="$1"; shift
-  local zeile="" paar trenner=""
+  local zeile="" paar trenner="" kurz=""
   for paar in "$@"; do
     zeile="$zeile$trenner${fett}${paar%%:*}${aus}=${grau}${paar#*:}${aus}"
+    kurz="$kurz${kurz:+ / }${paar%%:*}"
     trenner="  "
   done
+  TASTEN_ZULETZT="$kurz"
   printf '%s%s\n' "$einzug" "$zeile"
+}
+
+# Hinweis nach einer ungueltigen Eingabe, gebildet aus den Tasten der zuletzt
+# gezeigten Legende. Frueher stand er als eigener Text daneben -- eine neue
+# Taste haette man an zwei Stellen eintragen muessen.
+tasten_bitte() {   # tasten_bitte <einzug>
+  printf '%s%sBitte %s%s\n' "$1" "$gelb" "$TASTEN_ZULETZT" "$aus"
 }

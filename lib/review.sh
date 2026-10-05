@@ -32,7 +32,7 @@ r_einzeln_fragen() {   # r_einzeln_fragen <zeile>  -> Antwort in R_ANTWORT
       j|J|n|N|s|S|q|Q) R_ANTWORT="$antwort"; return 0;;
       "") R_ANTWORT=s; return 0;;
       o|O) open -R "$pfad" 2>/dev/null;;
-      *) printf '    %sBitte j / n / o / s / q%s\n' "$gelb" "$aus";;
+      *) tasten_bitte '    ';;
     esac
   done
 }
@@ -123,7 +123,7 @@ r_gruppe_abschliessen() {
         o|O) open -R "$(printf '%s' "${nach_alter[0]}" | cut -f5)" 2>/dev/null;;
         s|S|"") for zeile in "${nach_alter[@]}"; do R_AUSGABE+=("$zeile"); done; return 0;;
         q|Q) R_ABBRUCH=1; for zeile in "${nach_alter[@]}"; do R_AUSGABE+=("$zeile"); done; return 0;;
-        *[!0-9]*|'') printf '  %sBitte eine Zahl von 1 bis %d, oder n / o / s / q%s\n' "$gelb" "$n_offen" "$aus";;
+        *[!0-9]*|'') tasten_bitte '  ';;
         *)
           k="$antwort"
           if [ "$k" -ge 1 ] && [ "$k" -le "$n_offen" ]; then
@@ -140,7 +140,7 @@ $(printf '%s' "$zeile" | cut -f5)"
             done
             return 0
           fi
-          printf '  %sBitte eine Zahl von 1 bis %d, oder n / o / s / q%s\n' "$gelb" "$n_offen" "$aus";;
+          tasten_bitte '  ';;
       esac
     done
   fi
@@ -173,7 +173,7 @@ $pfad1"; return 0;;
         o|O) open -R "$pfad1" 2>/dev/null;;
         s|S|"") R_AUSGABE+=("${offen[0]}"); return 0;;
         q|Q) R_ABBRUCH=1; R_AUSGABE+=("${offen[0]}"); return 0;;
-        *) printf '  %sBitte j / n / o / s / q%s\n' "$gelb" "$aus";;
+        *) tasten_bitte '  ';;
       esac
     done
   fi
@@ -227,7 +227,7 @@ $(printf '%s' "$zeile" | cut -f5)"
           esac
         done
         return 0;;
-      *) printf '  %sBitte j / n / e / o / s / q%s\n' "$gelb" "$aus";;
+      *) tasten_bitte '  ';;
     esac
   done
 }
