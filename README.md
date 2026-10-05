@@ -247,6 +247,9 @@ Diese Pfade lehnt `apply` ab, selbst wenn sie als Kandidat markiert sind:
 - `~/Library/Application Support/AddressBook` — Kontakte
 - `~/Library/Group Containers/group.com.apple.notes*` — Notizen
 - `~/Library/Group Containers/UBF8T346G9.*` und alles mit `OneDrive` im Pfad
+- Cloud-Ordner: `~/Library/CloudStorage` (Dropbox, Google Drive, Box und
+  andere File-Provider) sowie die älteren Orte `~/Dropbox`, `~/Google Drive`,
+  `~/Box`, `~/pCloud Drive`
 - `~/Library/Metadata` — Spotlight-Index
 - `~/Library/Preferences/ByHost` — rechnergebundene Einstellungen
 - `~/.ssh`, `~/.gnupg`
@@ -438,4 +441,6 @@ liegen nur das Skript und seine Gruppierungsregeln.
 - Es fasst nichts außerhalb des Home-Verzeichnisses an.
 - Es entscheidet nicht, welche von zwei inhaltsgleichen Dateien die richtige
   ist — das weißt nur du.
-- Es räumt keine Cloud-Ordner auf, deren Inhalt anderen gehört.
+- Es räumt keine Cloud-Ordner auf. Was dort verschwindet, verschwindet auf
+  dem Server, bei geteilten Ordnern für alle. Die Scans gehen gar nicht erst
+  hinein: Schon das Hashen einer nur online liegenden Datei lädt sie herunter.

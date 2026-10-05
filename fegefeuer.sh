@@ -125,6 +125,10 @@ ist_geschuetzt() {
     "$HOME"/Library/Metadata*|\
     "$HOME"/Library/Group\ Containers/UBF8T346G9.*|\
     *OneDrive*|\
+    "$HOME"/Library/CloudStorage|"$HOME"/Library/CloudStorage/*|\
+    "$HOME"/Dropbox|"$HOME"/Dropbox/*|"$HOME"/Dropbox\ \(*|\
+    "$HOME"/Google\ Drive|"$HOME"/Google\ Drive/*|\
+    "$HOME"/Box|"$HOME"/Box/*|"$HOME"/pCloud\ Drive|"$HOME"/pCloud\ Drive/*|\
     "$HOME"/.fegefeuer|"$HOME"/.fegefeuer/*|\
     "$HOME"/.aufraeumen-quarantaene|"$HOME"/.aufraeumen-quarantaene/*|\
     "$ARBEIT"|"$ARBEIT"/*|\
@@ -146,6 +150,15 @@ ist_geschuetzt() {
 # nach sieben Tagen beide.
 INTERN_AUSSCHLUSS=(! -path "$HOME/.fegefeuer/*" ! -path "$HOME/.aufraeumen-quarantaene/*"
                    ! -path "$ARBEIT/*")
+
+# Cloud-Ordner gehoeren nicht nur diesem Rechner: Was hier verschwindet,
+# verschwindet auf dem Server, bei geteilten Ordnern fuer alle. Die Scans
+# gehen gar nicht erst hinein -- schon das Lesen einer nur online liegenden
+# Datei, etwa zum Hashen, laedt sie herunter.
+# Gegenstueck zu den Cloud-Eintraegen in ist_geschuetzt.
+WOLKEN_AUSSCHLUSS=(! -path "$HOME/Library/CloudStorage/*" ! -path "*/Library/Mobile Documents/*"
+                   ! -path "*OneDrive*" ! -path "$HOME/Dropbox/*" ! -path "$HOME/Dropbox (*"
+                   ! -path "$HOME/Google Drive/*" ! -path "$HOME/Box/*" ! -path "$HOME/pCloud Drive/*")
 
 # ---------- App installiert? ----------
 app_existiert() {
@@ -337,9 +350,8 @@ befehl_scan() {
       "$(stat -f '%Sm' -t '%Y-%m-%d' "$f" 2>/dev/null)" \
       "$f" "große Einzeldatei — bitte einzeln prüfen"
     n=$((n+1))
-  done < <(find "$HOME" -type f -size +200M \
-             ! -path "*/Library/Mobile Documents/*" ! -path "*/.Trash/*" \
-             ! -path "*/.photoslibrary/*" "${INTERN_AUSSCHLUSS[@]}" -print0 2>/dev/null)
+  done < <(find "$HOME" -type f -size +200M ! -path "*/.Trash/*" \
+             ! -path "*/.photoslibrary/*" "${INTERN_AUSSCHLUSS[@]}" "${WOLKEN_AUSSCHLUSS[@]}" -print0 2>/dev/null)
   fortschritt_ende
   info "  ${fett}$n${aus} gefunden"
 
@@ -354,7 +366,7 @@ befehl_scan() {
   find "$HOME" -type f -size +"$dubletten_ab" \
     ! -path "$HOME/Library/*" ! -path "*/.Trash/*" ! -path "*/node_modules/*" \
     ! -path "*/.git/*" ! -path "*/.nvm/*" ! -path "*/.pyenv/*" ! -path "*/.m2/*" \
-    ! -path "*/.cargo/*" ! -path "*/.photoslibrary/*" "${INTERN_AUSSCHLUSS[@]}" \
+    ! -path "*/.cargo/*" ! -path "*/.photoslibrary/*" "${INTERN_AUSSCHLUSS[@]}" "${WOLKEN_AUSSCHLUSS[@]}" \
     -print0 2>/dev/null > "$dateiliste"
   local zu_hashen
   zu_hashen="$(tr -dc '\0' < "$dateiliste" | wc -c | tr -d ' ')"
@@ -1553,7 +1565,7 @@ befehl_video_scan() {
     -o -iname "*.mp4.zip" -o -iname "*.mov.zip" -o -iname "*.m4v.zip" \) \
     -size +20M \
     ! -path "*/Library/*" ! -path "*/.fegefeuer/*" ! -path "*/node_modules/*" \
-    ! -path "*/.Trash/*" ! -path "*.photoslibrary/*" ! -path "*OneDrive*" \
+    ! -path "*/.Trash/*" ! -path "*.photoslibrary/*" "${WOLKEN_AUSSCHLUSS[@]}" \
     -print 2>/dev/null | sort > "$tmp"
   local gefunden; gefunden="$(wc -l < "$tmp" | tr -d ' ')"
   [ "$gefunden" -eq 0 ] && { info "  Keine Videos über 20 MB gefunden."; return 0; }
