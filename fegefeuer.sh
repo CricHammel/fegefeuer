@@ -1358,6 +1358,43 @@ purge_wieder_da() {
   info "\n${gruen}$geloescht Einträge gelöscht${aus}, $(mb "$wirklich_frei") freigegeben."
 }
 
+# ---------- brew ----------
+# Homebrew-Pakete lassen sich nicht sinnvoll in Quarantaene schieben.
+# Stattdessen: Vorschlagsliste erzeugen, die du selbst durchgehst.
+befehl_brew() {
+  command -v brew >/dev/null 2>&1 || { fehler "Homebrew nicht gefunden."; return 1; }
+  local cellar; cellar="$(brew --cellar 2>/dev/null)"
+  titel "Veraltete Versionen (brew cleanup)"
+  brew cleanup --dry-run 2>/dev/null | tail -12
+
+  titel "Direkt installierte Pakete, nach Groesse"
+  info "${grau}Nur diese hast du selbst gewollt -- alles andere sind Abhaengigkeiten.${aus}"
+  info "${grau}Kein anderes Paket haengt davon ab -- Deinstallation reisst nichts mit.${aus}"
+  info "${grau}Datum = wann zuletzt installiert/aktualisiert, nicht wann zuletzt benutzt.${aus}\n"
+  local liste="$BASIS/brew-vorschlag.sh"
+  {
+    echo "#!/usr/bin/env bash"
+    echo "# Von fegefeuer.sh erzeugt am $(date '+%d.%m.%Y %H:%M')"
+    echo "# Zeilen loeschen, die du behalten willst -- dann ausfuehren."
+    echo "# Rueckgaengig jederzeit mit: brew install <name>"
+    echo
+  } > "$liste"
+
+  brew leaves 2>/dev/null | while read -r f; do
+    local d="$cellar/$f"
+    [ -d "$d" ] || continue
+    printf '%s\t%s\n' "$(du -sk "$d" 2>/dev/null | cut -f1)" "$f"
+  done | sort -nr | while IFS=$'\t' read -r kb f; do
+    local seit; seit="$(stat -f '%Sm' -t '%Y-%m-%d' "$cellar/$f" 2>/dev/null)"
+    printf '  %9s  %s  %s\n' "$(mb "$kb")" "$seit" "$f"
+    printf 'brew uninstall %s   # %s, installiert %s\n' "$f" "$(mb "$kb")" "$seit" >> "$liste"
+  done
+  chmod +x "$liste"
+  info "\nVorschlagsliste: ${fett}$liste${aus}"
+  info "${grau}Durchgehen, unerwuenschte Zeilen loeschen, dann ausfuehren.${aus}"
+  info "Platzsparen ohne Risiko: ${fett}brew cleanup${aus}"
+}
+
 # ---------- mark ----------
 # Sammelentscheidung fuer eine ganze Kategorie, spart Einzelklicks im review.
 befehl_mark() {
