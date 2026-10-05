@@ -55,11 +55,20 @@ video_ffmpeg() {   # video_ffmpeg <dauer_s> <text> <ffmpeg-argumente...>
   local meldedatei="$ARBEIT/ff_fortschritt.txt"
   : > "$meldedatei"
   ffmpeg -hide_banner -nostats -loglevel error -progress "$meldedatei" "$@" -y 2>/dev/null &
-  local ff=$!
-  local gesamt_ms
-  gesamt_ms="$(LC_ALL=C awk -v d="$dauer" 'BEGIN{ printf "%d", d * 1000 }')"
+  ffmpeg_verfolgen $! "$meldedatei" "$dauer" "$text"
+  local rc=$?
+  rm -f "$meldedatei"
+  return "$rc"
+}
+
+# Wartet auf einen ffmpeg-Prozess im Hintergrund und zeigt dabei, wie weit er
+# ist. Gestartet wird ffmpeg vom Aufrufer, weil die Aufrufe sich darin
+# unterscheiden, wohin die Ausgabe geht. Gibt den Rueckgabewert von ffmpeg
+# zurueck.
+ffmpeg_verfolgen() {   # ffmpeg_verfolgen <pid> <meldedatei> <dauer_s> <text>
+  local ff="$1" meldedatei="$2" text="$4" gesamt_ms us rc
+  gesamt_ms="$(LC_ALL=C awk -v d="$3" 'BEGIN{ printf "%d", d * 1000 }')"
   fortschritt_start
-  local us
   while kill -0 "$ff" 2>/dev/null; do
     us="$(grep '^out_time_us=' "$meldedatei" 2>/dev/null | tail -1 | cut -d= -f2)"
     case "$us" in
@@ -69,9 +78,8 @@ video_ffmpeg() {   # video_ffmpeg <dauer_s> <text> <ffmpeg-argumente...>
     sleep 1
   done
   wait "$ff"
-  local rc=$?
+  rc=$?
   fortschritt_ende
-  rm -f "$meldedatei"
   return "$rc"
 }
 
@@ -251,6 +259,7 @@ video_bericht() {
 
   titel "Was sich lohnt"
   LC_ALL=C awk -F'\t' -v h="$HOME" '
+    # Gegenstueck zu zahl() fuer Werte, die in awk Zeile fuer Zeile entstehen
     function komma(w, n,   t) { t = sprintf("%.*f", n, w); sub(/\./, ",", t); return t }
     $12=="lohnt" {
       p=$2; sub(h, "~", p)
@@ -269,7 +278,8 @@ video_bericht() {
     local rest_gb
     rest_gb="$(LC_ALL=C awk -F'\t' '$12=="lohnt"{g[++n]=($9-$14)/1048576}
       END{ m=n; for(i=1;i<=n;i++) for(j=i+1;j<=n;j++) if(g[j]>g[i]){t=g[i];g[i]=g[j];g[j]=t}
-           for(i=16;i<=n;i++) s+=g[i]; t=sprintf("%.2f", s); sub(/\./,",",t); print t }' "$VIDEOLISTE")"
+           for(i=16;i<=n;i++) s+=g[i]; printf "%.2f", s }' "$VIDEOLISTE")"
+    rest_gb="$(zahl "$rest_gb" 2)"
     info "  ${grau}… und $((zeilen - 15)) weitere, zusammen $rest_gb GB Ersparnis${aus}"
   fi
 
@@ -355,21 +365,8 @@ video_pruefen() {   # video_pruefen <neu> <original> -> SSIM oder Grund, 0 = gut
   : > "$meldedatei"
   ffmpeg -hide_banner -nostats -xerror -progress "$meldedatei" -i "$neu" -i "$alt" \
     -lavfi "$lavfi" -f null - > "$ARBEIT/ssim_ausgabe.txt" 2>&1 &
-  local ff=$!
-  local gesamt_ms us
-  gesamt_ms="$(LC_ALL=C awk -v d="$d_alt" 'BEGIN{ printf "%d", d * 1000 }')"
-  fortschritt_start
-  while kill -0 "$ff" 2>/dev/null; do
-    us="$(grep '^out_time_us=' "$meldedatei" 2>/dev/null | tail -1 | cut -d= -f2)"
-    case "$us" in
-      ''|*[!0-9]*) ;;
-      *) fortschritt "$((us / 1000))" "$gesamt_ms" "prüfe Bild und Ton";;
-    esac
-    sleep 1
-  done
-  wait "$ff"
+  ffmpeg_verfolgen $! "$meldedatei" "$d_alt" "prüfe Bild und Ton"
   local rc=$?
-  fortschritt_ende
   ausgabe="$(cat "$ARBEIT/ssim_ausgabe.txt" 2>/dev/null)"
   rm -f "$meldedatei" "$ARBEIT/ssim_ausgabe.txt"
   if [ "$rc" -ne 0 ]; then echo "Datei laesst sich nicht fehlerfrei durchspielen"; return 1; fi
@@ -438,7 +435,7 @@ befehl_video_review() {
     done
   done 3< "$VIDEOLISTE"
 
-  if [ ${#ausgabe[@]} -eq 0 ]; then : > "$VIDEOLISTE"; else printf '%s\n' "${ausgabe[@]}" > "$VIDEOLISTE"; fi
+  zeilen_schreiben "$VIDEOLISTE" "${ausgabe[@]+"${ausgabe[@]}"}"
   local n_go
   n_go="$(awk -F'\t' '$1=="go"' "$VIDEOLISTE" | wc -l | tr -d ' ')"
   info "\nFreigegeben: ${fett}$n_go${aus}"
