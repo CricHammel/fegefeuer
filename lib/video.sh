@@ -618,9 +618,10 @@ befehl_video_run() {
     zielname="${zielname%.*}.mp4"
     # Aus film.mov wird film.mp4 -- das darf keine fremde Datei ueberschreiben.
     if [ -e "$zielname" ] && [ "$zielname" != "$pfad" ]; then
-      local i=2
-      while [ -e "${zielname%.mp4} ($i).mp4" ]; do i=$((i+1)); done
-      zielname="${zielname%.mp4} ($i).mp4"
+      # Eigener Zaehler: i zaehlt die Dateien dieses Laufs fuer die Anzeige [i/n]
+      local zaehler=2
+      while [ -e "${zielname%.mp4} ($zaehler).mp4" ]; do zaehler=$((zaehler+1)); done
+      zielname="${zielname%.mp4} ($zaehler).mp4"
       warn "  Zielname war belegt, lege ab als $(basename "$zielname")"
     fi
     mv "$neu" "$zielname"
