@@ -3,8 +3,10 @@
 #
 # Wird von fegefeuer.sh geladen, nicht direkt aufgerufen.
 
+# Der Status ist das erste Feld: neuer Status plus alles ab dem ersten Tab.
+# Ohne awk -- das lief bei jeder einzelnen Entscheidung im review.
 status_setzen() {   # status_setzen <zeile> <neuer-status>
-  printf '%s' "$1" | awk -F'\t' -v OFS='\t' -v st="$2" '{ $1=st; print }'
+  printf '%s\t%s\n' "$2" "${1#*$'\t'}"
 }
 
 # Gruppenschluessel (Spalte 7) und lesbares Etikett (Spalte 8) vergeben
