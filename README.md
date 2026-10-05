@@ -126,6 +126,12 @@ Produkten werden getrennt gehalten — `microsoft · powerpoint`,
 `microsoft · sharepoint` und `microsoft · teams` sind drei Entscheidungen,
 keine einzige.
 
+Diese Benennung gilt nur für App-Reste. Alle anderen Gruppen heißen nach
+ihrem Pfad (`~/.cache`), Dubletten nach Anzahl und Dateiname (`2× Datei.bin`).
+Früher wurde jeder Name mit Punkt in Hersteller und Produkt zerlegt — aus
+`~/.nvm/versions/node/v16.20.2` wurde „~/ · 2“, und `gruppen` warf zwei
+Node-Versionen mit diesem Namen in eine Zeile.
+
 Die Tastenbelegung steht bei **jeder** Frage, nicht nur einmal im Kopf — wer
 150 Dubletten durchgeht, soll nicht raten müssen.
 

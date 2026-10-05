@@ -173,7 +173,7 @@ status_setzen() {   # status_setzen <zeile> <neuer-status>
 gruppen_zuordnen() {
   local awkdatei="$BASIS/gruppen.awk"
   [ -f "$awkdatei" ] || { warn "Gruppendefinition fehlt, ueberspringe Gruppierung."; return 0; }
-  awk -f "$awkdatei" "$KANDIDATEN" "$KANDIDATEN" > "$KANDIDATEN.grp" \
+  awk -v home="$HOME" -f "$awkdatei" "$KANDIDATEN" "$KANDIDATEN" > "$KANDIDATEN.grp" \
     && mv "$KANDIDATEN.grp" "$KANDIDATEN"
 }
 
@@ -1639,14 +1639,18 @@ befehl_gruppen() {
   local kat="${1:-}"
   titel "Offene Gruppen${kat:+ in $kat}"
   awk -F'\t' -v k="$kat" '$1=="neu" && (k=="" || $2==k) {
-        n[$8]++; s[$8]+=$3; kat[$8]=$2
-      } END { for (g in n) printf "%d\t%d\t%s\t%s\n", s[g], n[g], kat[g], g }' "$KANDIDATEN" \
+        # Zusammengefasst wird nach dem Schluessel, angezeigt das Etikett.
+        # Nach dem Etikett zu gruppieren hiesse, zwei Gruppen zu verschmelzen,
+        # nur weil ihre Namen zufaellig gleich lauten.
+        n[$7]++; s[$7]+=$3; kat[$7]=$2
+        if (!($7 in et)) et[$7] = ($8 != "" ? $8 : $5)
+      } END { for (g in n) printf "%d\t%d\t%s\t%s\n", s[g], n[g], kat[g], et[g] }' "$KANDIDATEN" \
     | sort -t$'\t' -k1,1nr \
     | while IFS=$'\t' read -r kb n kt g; do
         printf '  %9s  %3d  %-10s %s\n' "$(mb "$kb")" "$n" "$kt" "$g"
       done
   local gz ez
-  gz="$(awk -F'\t' -v k="$kat" '$1=="neu" && (k=="" || $2==k){print $8}' "$KANDIDATEN" | sort -u | wc -l | tr -d ' ')"
+  gz="$(awk -F'\t' -v k="$kat" '$1=="neu" && (k=="" || $2==k){print $7}' "$KANDIDATEN" | sort -u | wc -l | tr -d ' ')"
   ez="$(awk -F'\t' -v k="$kat" '$1=="neu" && (k=="" || $2==k)' "$KANDIDATEN" | wc -l | tr -d ' ')"
   info "\n  ${fett}$gz Gruppen${aus} aus $ez Einträgen"
 }

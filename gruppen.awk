@@ -52,11 +52,15 @@ NR == FNR {
 
 {
   reihen[FNR] = $0
+  kategorie[FNR] = $2
   if ($2 == "app-rest") {
     basis = $5; sub(/.*\//, "", basis)
     tokenisieren(basis)
     if (tok1 == "") schluessel = tolower(basis)
-    else if (produkte[tok1] >= 3 && tok2 != "") schluessel = tok1 "." tok2
+    else if (produkte[tok1] >= 3 && tok2 != "") {
+      schluessel = tok1 "." tok2
+      zusammengesetzt[schluessel] = 1
+    }
     else schluessel = tok1
     # Haeufigsten Produktnamen je Gruppe merken -- der ist wiedererkennbarer
     # als der Herstellername (com.khanov.BlockerX -> "BlockerX", nicht "khanov")
@@ -76,6 +80,9 @@ NR == FNR {
     schluessel = $5
   }
   gruppe[FNR] = schluessel
+  # Fuer Gruppen ausser App-Resten: erster Pfad und Zahl der Mitglieder
+  mitglieder[schluessel]++
+  if (!(schluessel in erster)) erster[schluessel] = $5
 }
 
 END {
@@ -85,8 +92,19 @@ END {
     n6 = split(reihen[i], feld, "\t")
     reihen[i] = feld[1]
     for (j = 2; j <= 6 && j <= n6; j++) reihen[i] = reihen[i] "\t" feld[j]
-    if (index(g, ".") > 0) {
-      # Schluessel traegt schon Hersteller.Produkt
+    if (kategorie[i] != "app-rest") {
+      # "Hersteller · Produkt" ergibt nur bei Bundle-IDs Sinn. Bei allen
+      # anderen ist der Schluessel ein Pfad, und Pfade haben Punkte --
+      # aus ~/.nvm/versions/node/v16.20.2 wurde frueher "/Users/x/ · 2".
+      if (kategorie[i] == "dublette") {
+        name = erster[g]; sub(/.*\//, "", name)
+        etikett = mitglieder[g] "\xc3\x97 " name
+      } else {
+        etikett = g
+        if (home != "" && index(etikett, home "/") == 1) etikett = "~" substr(etikett, length(home) + 1)
+      }
+    } else if (g in zusammengesetzt) {
+      # Schluessel traegt Hersteller.Produkt
       hersteller = g; sub(/\..*/, "", hersteller)
       produkt    = g; sub(/.*\./, "", produkt)
       etikett = hersteller " \xc2\xb7 " produkt
