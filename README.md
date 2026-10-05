@@ -286,12 +286,61 @@ brew cleanup                 # alte Versionen, risikolos
 
 Homebrew wird nicht in die Quarantäne verschoben — dort ist `brew uninstall`
 das richtige Werkzeug, und `brew install` macht es rückgängig. Der Unterbefehl
-zeigt, was du selbst installiert hast (`brew leaves`), und schreibt eine
-Vorschlagsliste `brew-vorschlag.sh`. Zeilen löschen, die bleiben sollen, dann
-ausführen.
+zeigt, was du installiert hast, und schreibt eine Vorschlagsliste
+`brew-vorschlag.sh`. Formulas und Programme behandelt er verschieden.
 
-Die lohnendsten Fäden sind die, an denen ein kleines Paket ein großes mitzieht:
-`powershell` allein hält 669 MB `dotnet` fest.
+### Formulas: nach dem, was wirklich frei wird
+
+Gezeigt werden die Pakete, die du selbst installiert hast (`brew leaves`) —
+und zwar mit dem Platz, den ihr Entfernen tatsächlich bringt: das Paket
+selbst plus die Abhängigkeiten, die kein anderes Paket mehr braucht.
+
+```
+     744 MB  2026-09-20  powershell  davon 669 MB Abhängigkeiten
+     371 MB  2026-08-26  openjdk@25
+     208 MB  2026-09-04  freeciv     davon 123 MB Abhängigkeiten
+```
+
+Die eigene Größe allein täuscht: `powershell` belegt 74 MB und stünde damit
+weit hinten, hält aber 669 MB `dotnet` fest. Abhängigkeiten, die sich zwei
+Pakete teilen, zählen bei keinem von beiden — sie werden erst frei, wenn
+beide gehen.
+
+In der Vorschlagsliste löschst du die Zeilen, die bleiben sollen. Am Ende
+steht `brew autoremove`; erst damit werden die Abhängigkeiten tatsächlich
+entfernt. Es nimmt auch mit, was schon vorher verwaist war.
+
+### Programme (Casks): zur Übersicht
+
+Programme benutzt man meistens — „streichen, was bleibt“ wäre hier falsch
+herum. Sie erscheinen nach Größe sortiert mit dem Datum, an dem sie zuletzt
+geöffnet wurden, und stehen in der Vorschlagsliste **auskommentiert**.
+Entfernt wird nur, was du ausdrücklich freischaltest.
+
+```
+     2,2 GB  2026-09-28  docker-desktop
+     885 MB  unbekannt   claude
+          ?              nordvpn (ohne App — Größe unbekannt)
+```
+
+Das Datum stammt von Spotlight und ist nur in einer Richtung aussagekräftig.
+Ein altes Datum ist ein brauchbares Signal; ab 90 Tagen wird es markiert.
+„unbekannt“ heißt dagegen nicht unbenutzt — der Eintrag fehlt auch bei Apps,
+die regelmäßig laufen. Betroffen sind vor allem solche, die sich selbst
+aktualisieren; vermutlich geht er verloren, wenn sie ihr App-Bundle austauschen.
+
+`brew uninstall --cask` entfernt nur die App, nicht ihre Daten in
+`~/Library`. Die findet der nächste `scan` als App-Rest, und sie gehen den
+üblichen Weg durch das Fegefeuer.
+
+Welche Programme installiert sind, sagt `brew list`, nicht
+`brew info --installed`. Letzteres ließ AlDente weg: Die App läuft, aber ihr
+Eintrag im Caskroom ist unvollständig. Solche Fälle werden angezeigt und
+markiert, weil `brew uninstall` an ihnen scheitern kann.
+
+Die Cask-Daten liefert Homebrew als JSON. Gelesen wird es mit JavaScript über
+`osascript`, das jeder Mac mitbringt — `jq` oder Python wären zusätzliche
+Voraussetzungen.
 
 ## Videos neu kodieren
 
