@@ -360,6 +360,15 @@ video_bericht() {
 # Ueber die Umgebungsvariable FEGEFEUER_SSIM_MIN anpassbar.
 VIDEO_SSIM_MIN="${FEGEFEUER_SSIM_MIN:-0.90}"
 
+# Zahl der Tonspuren. Gezaehlt werden verschiedene Spurnummern, nicht
+# Zeilen: Verweist eine Timecode-Spur auf Bild und Ton (GoPro), zeigt ffprobe
+# ab Version 8 das als Stream-Gruppe und fuehrt die Tonspur darin ein zweites
+# Mal auf, dazu eine Leerzeile.
+video_tonspuren() {   # video_tonspuren <datei>
+  ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "$1" 2>/dev/null \
+    | grep . | sort -u | wc -l | tr -d ' '
+}
+
 video_pruefen() {   # video_pruefen <neu> <original> -> SSIM oder Grund, 0 = gut
   local neu="$1" alt="$2"
   [ -s "$neu" ] || { echo "Datei ist leer"; return 1; }
@@ -374,8 +383,8 @@ video_pruefen() {   # video_pruefen <neu> <original> -> SSIM oder Grund, 0 = gut
 
   # Tonspur: ein stiller Film faellt sonst erst Monate spaeter auf
   local ton_neu ton_alt
-  ton_neu="$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "$neu" 2>/dev/null | wc -l | tr -d ' ')"
-  ton_alt="$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "$alt" 2>/dev/null | wc -l | tr -d ' ')"
+  ton_neu="$(video_tonspuren "$neu")"
+  ton_alt="$(video_tonspuren "$alt")"
   if [ "$ton_neu" -lt "$ton_alt" ]; then echo "Tonspur fehlt ($ton_neu statt $ton_alt)"; return 1; fi
 
   # Eine vollstaendige SSIM-Messung statt Stichproben. Stichproben mit

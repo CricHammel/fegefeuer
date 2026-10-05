@@ -696,6 +696,35 @@ MV
   pruefe "kein Stapel übrig" gleich "$(stapel)" ""
 }
 
+# Kameras wie GoPro legen eine Timecode-Spur an, die auf Bild und Ton
+# verweist. ffprobe ab Version 8 zeigt das als Stream-Gruppe und fuehrt die
+# Tonspur darin ein zweites Mal auf, dazu eine Leerzeile. Die Pruefung zaehlte
+# Zeilen und lehnte ab: "Tonspur fehlt (2 statt 3)" -- bei je einer Tonspur.
+# Eine solche Datei laesst sich mit ffmpeg nicht erzeugen. Ein vorgeschaltetes
+# ffprobe gibt deshalb fuer das Original aus, was ffprobe 9 bei einer echten
+# GoPro-Datei ausgibt: die Tonspur in der Gruppe, eine Leerzeile, die Tonspur.
+test_video_timecode_spur() {
+  sandbox
+  hat_ffmpeg || { ueberspringen "kein ffmpeg"; return 0; }
+  mkdir -p "$H/Film"
+  testvideo "$H/Film/gopro.mov"
+  video_freigeben "$H/Film/gopro.mov"
+  local bin="$WURZEL/$aktuell/bin" echt; echt="$(command -v ffprobe)"
+  mkdir -p "$bin"
+  cat > "$bin/ffprobe" <<FFPROBE
+#!/bin/bash
+ausgabe="\$("$echt" "\$@")"
+case "\$*" in
+  *"-select_streams a"*gopro.mov*) printf '%s\n\n' "\$(printf '%s\n' "\$ausgabe" | grep .)";;
+esac
+printf '%s\n' "\$ausgabe"
+FFPROBE
+  chmod +x "$bin/ffprobe"
+  local ausgabe; ausgabe="$(echo j | PATH="$bin:$PATH" ff video run --profil sparsam)"
+  pruefe "keine falsche Tonspur-Meldung" nicht enthaelt "$ausgabe" "Tonspur fehlt"
+  pruefe "kodiert und geprüft" gleich "$(video_status "$H/Film/gopro.mov")" fertig
+}
+
 # purge --wieder-da laesst die Originale neu kodierter Videos aus, das
 # gewoehnliche purge loeschte sie mit, ohne sie zu erwaehnen.
 test_purge_nennt_videooriginale() {
