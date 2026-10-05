@@ -390,6 +390,26 @@ video_pruefen() {   # video_pruefen <neu> <original> -> SSIM oder Grund, 0 = gut
   return 0
 }
 
+# Strg-C in video review: sichern, was bis dahin entschieden ist, dann
+# beenden -- wie r_unterbrochen im review. Die Entscheidungen stehen in
+# ausgabe, der lokalen Liste von befehl_video_review; die Falle laeuft in
+# deren Kontext und sieht sie. Schluessel ist der Pfad (Spalte 2).
+v_unterbrochen() {
+  trap - INT
+  local entscheidungen="$ARBEIT/video_entscheidungen.tsv"
+  zeilen_schreiben "$entscheidungen" "${ausgabe[@]+"${ausgabe[@]}"}"
+  awk -F'\t' -v OFS='\t' '
+      FILENAME==ARGV[1] { if ($1 != "") status[$2] = $1; next }
+      ($2 in status) { $1 = status[$2] }
+      { print }' "$entscheidungen" "$VIDEOLISTE" > "$VIDEOLISTE.tmp" \
+    && mv "$VIDEOLISTE.tmp" "$VIDEOLISTE"
+  rm -f "$entscheidungen"
+  printf '\n'
+  info "Unterbrochen. Was du bis hierher entschieden hast, ist gespeichert."
+  info "Weiter mit: ${fett}$0 video review${aus}"
+  exit 130
+}
+
 befehl_video_review() {
   [ -s "$VIDEOLISTE" ] || { fehler "Keine Videoliste. Erst '$0 video scan'."; return 1; }
   local offen
@@ -401,6 +421,7 @@ befehl_video_review() {
 
   local -a ausgabe=()
   local zeile nr=0 abbruch=0 alle=0
+  trap v_unterbrochen INT
   while IFS= read -r zeile <&3; do
     local st pfad verpackt codec w h fps dauer kb rohkb bpp urteil neu_schnell neu_kb
     felder_lesen "$zeile" st pfad verpackt codec w h fps dauer kb rohkb bpp urteil neu_schnell neu_kb
@@ -430,6 +451,7 @@ befehl_video_review() {
       esac
     done
   done 3< "$VIDEOLISTE"
+  trap - INT
 
   zeilen_schreiben "$VIDEOLISTE" "${ausgabe[@]+"${ausgabe[@]}"}"
   local n_go
