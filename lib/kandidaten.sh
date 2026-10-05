@@ -39,15 +39,25 @@ liegt_innerhalb() {   # liegt_innerhalb <pfad> <pfadliste>
   return 1
 }
 
-schreibe_kandidaten() {
-  if [ "$#" -eq 0 ]; then : > "$KANDIDATEN"; else printf '%s\n' "$@" > "$KANDIDATEN"; fi
+schreibe_kandidaten() { zeilen_schreiben "$KANDIDATEN" "$@"; }
+
+# Groesse und Aenderungsdatum ermittelt die Funktion selbst -- frueher stand
+# beides an jedem der sechs Aufrufe im scan. -x: nicht in andere Volumes
+# hinabsteigen; fuer einzelne Dateien aendert das nichts.
+kandidat_schreiben() {   # kandidat_schreiben <kategorie> <pfad> <begruendung> [gruppenschluessel]
+  local kb mt
+  kb="$(du -sk -x "$2" 2>/dev/null | cut -f1)"
+  mt="$(stat -f '%Sm' -t '%Y-%m-%d' "$2" 2>/dev/null)"
+  if [ -n "${4:-}" ]; then
+    printf 'neu\t%s\t%s\t%s\t%s\t%s\t%s\n' "$1" "$kb" "$mt" "$2" "$3" "$4" >> "$KANDIDATEN.tmp"
+  else
+    printf 'neu\t%s\t%s\t%s\t%s\t%s\n' "$1" "$kb" "$mt" "$2" "$3" >> "$KANDIDATEN.tmp"
+  fi
 }
 
-kandidat_schreiben() {
-  # kategorie, groesse_kb, mtime, pfad, begruendung, [gruppenschluessel]
-  if [ -n "${6:-}" ]; then
-    printf 'neu\t%s\t%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$5" "$6" >> "$KANDIDATEN.tmp"
-  else
-    printf 'neu\t%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$5" >> "$KANDIDATEN.tmp"
-  fi
+# Aeltere Kandidatenlisten haben die Gruppenspalten 7 und 8 noch nicht
+gruppen_sicherstellen() {
+  [ "$(head -1 "$KANDIDATEN" | awk -F'\t' '{print NF}')" -lt 8 ] || return 0
+  info "${grau}Ergänze Gruppenzuordnung …${aus}"
+  gruppen_zuordnen
 }

@@ -85,10 +85,7 @@ befehl_scan() {
       done
       if [ -z "$treffer" ]; then
         gefunden=$((gefunden+1))
-        kandidat_schreiben "app-rest" \
-          "$(du -sk -x "$e" 2>/dev/null | cut -f1)" \
-          "$(stat -f '%Sm' -t '%Y-%m-%d' "$e" 2>/dev/null)" \
-          "$e" "keine App mit Bundle-ID '$id' installiert"
+        kandidat_schreiben "app-rest" "$e" "keine App mit Bundle-ID '$id' installiert"
       fi
     done
   done
@@ -107,10 +104,7 @@ befehl_scan() {
     local p="${eintrag%%|*}" grund="${eintrag#*|}"
     [ -e "$p" ] || continue
     ist_geschuetzt "$p" && continue
-    kandidat_schreiben "cache" \
-      "$(du -sk -x "$p" 2>/dev/null | cut -f1)" \
-      "$(stat -f '%Sm' -t '%Y-%m-%d' "$p" 2>/dev/null)" \
-      "$p" "$grund"
+    kandidat_schreiben "cache" "$p" "$grund"
   done
   info "  ${fett}$(( ${#caches[@]} ))${aus} Cache-Orte geprüft"
 
@@ -122,10 +116,7 @@ befehl_scan() {
     for v in "$HOME/.nvm/versions/node"/*; do
       [ -d "$v" ] || continue
       [ "$(basename "$v")" = "$aktuell" ] && continue
-      kandidat_schreiben "toolchain" \
-        "$(du -sk -x "$v" 2>/dev/null | cut -f1)" \
-        "$(stat -f '%Sm' -t '%Y-%m-%d' "$v" 2>/dev/null)" \
-        "$v" "alte Node-Version (aktuell: $aktuell)"
+      kandidat_schreiben "toolchain" "$v" "alte Node-Version (aktuell: $aktuell)"
     done
   fi
   # playwright: alte Browser-Builds
@@ -136,10 +127,7 @@ befehl_scan() {
       for b in "$HOME/Library/Caches/ms-playwright/$familie"-*; do
         [ -d "$b" ] || continue
         [ "$b" = "$neueste" ] && continue
-        kandidat_schreiben "toolchain" \
-          "$(du -sk -x "$b" 2>/dev/null | cut -f1)" \
-          "$(stat -f '%Sm' -t '%Y-%m-%d' "$b" 2>/dev/null)" \
-          "$b" "alter Playwright-Build (neuester: $(basename "$neueste"))"
+        kandidat_schreiben "toolchain" "$b" "alter Playwright-Build (neuester: $(basename "$neueste"))"
       done
     done
   fi
@@ -152,10 +140,7 @@ befehl_scan() {
     durchsucht=$((durchsucht + 1))
     fortschritt_offen "durchsuche … $durchsucht Treffer geprüft"
     ist_geschuetzt "$f" && continue
-    kandidat_schreiben "gross" \
-      "$(du -sk "$f" 2>/dev/null | cut -f1)" \
-      "$(stat -f '%Sm' -t '%Y-%m-%d' "$f" 2>/dev/null)" \
-      "$f" "große Einzeldatei — bitte einzeln prüfen"
+    kandidat_schreiben "gross" "$f" "große Einzeldatei — bitte einzeln prüfen"
     n=$((n+1))
   done < <(find "$HOME" -type f -size +200M ! -path "*/.Trash/*" \
              ! -path "*/.photoslibrary/*" "${INTERN_AUSSCHLUSS[@]}" "${WOLKEN_AUSSCHLUSS[@]}" -print0 2>/dev/null)
@@ -211,10 +196,7 @@ befehl_scan() {
     printf '%s\t%s\n' "$h" "$p" >> "$gesiebt"
   done < <(LC_ALL=C awk -F'\t' 'NR==FNR { anzahl[$1]++; next } anzahl[$1] >= 2' "$hashdatei" "$hashdatei")
   while IFS=$'\t' read -r h p; do
-    kandidat_schreiben "dublette" \
-      "$(du -sk "$p" 2>/dev/null | cut -f1)" \
-      "$(stat -f '%Sm' -t '%Y-%m-%d' "$p" 2>/dev/null)" \
-      "$p" "eine von mehreren inhaltsgleichen Dateien" "dub-${h:0:12}"
+    kandidat_schreiben "dublette" "$p" "eine von mehreren inhaltsgleichen Dateien" "dub-${h:0:12}"
     dubletten=$((dubletten + 1))
   done < <(LC_ALL=C awk -F'\t' 'NR==FNR { anzahl[$1]++; next } anzahl[$1] >= 2' "$gesiebt" "$gesiebt")
   rm -f "$gesiebt"

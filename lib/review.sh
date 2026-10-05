@@ -234,11 +234,7 @@ $(printf '%s' "$zeile" | cut -f5)"
 
 befehl_review() {
   [ -f "$KANDIDATEN" ] || { fehler "Keine Kandidaten. Erst '$0 scan' laufen lassen."; return 1; }
-  # Aeltere Kandidatenlisten ohne Gruppenspalten nachruesten
-  if [ "$(head -1 "$KANDIDATEN" | awk -F'\t' '{print NF}')" -lt 8 ]; then
-    info "${grau}Ergänze Gruppenzuordnung …${aus}"
-    gruppen_zuordnen
-  fi
+  gruppen_sicherstellen
 
   local kat_filter="${1:-}"
   local gefiltert="$ARBEIT/review_teil.tsv"
@@ -343,7 +339,7 @@ befehl_zeigen() {
 # Ueberblick, was im review noch ansteht -- groesste Gruppen zuerst.
 befehl_gruppen() {
   [ -f "$KANDIDATEN" ] || { fehler "Keine Kandidaten."; return 1; }
-  if [ "$(head -1 "$KANDIDATEN" | awk -F'\t' '{print NF}')" -lt 8 ]; then gruppen_zuordnen; fi
+  gruppen_sicherstellen
   local kat="${1:-}"
   titel "Offene Gruppen${kat:+ in $kat}"
   awk -F'\t' -v k="$kat" '$1=="neu" && (k=="" || $2==k) {
