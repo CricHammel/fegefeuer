@@ -10,13 +10,6 @@
 
 VIDEOLISTE="$BASIS/video-kandidaten.tsv"
 
-# Messwerte von einem Apple M2, Quelle 4K60 H.264 mit 0,168 bpp:
-#   schnell  VideoToolbox q60    -> 0,055 bpp Ausgabe, rund 413 Mpx/s
-#   sparsam  x265 veryfast crf24 -> 0,040 bpp Ausgabe, rund  90 Mpx/s
-VIDEO_BPP_SCHNELL="0.055"
-VIDEO_BPP_SPARSAM="0.040"
-VIDEO_TEMPO_SCHNELL="413000000"
-VIDEO_TEMPO_SPARSAM="90000000"
 # Ab so viel Datenmenge je Bildpunkt lohnt das Neukodieren.
 VIDEO_SCHWELLE="0.10"
 # Bereits sparsame Codecs brauchen mehr, bevor sich ein Eingriff lohnt.
@@ -216,10 +209,12 @@ befehl_video_scan() {
   fortschritt_ende
   [ "$messfehler" -gt 0 ] && warn "$messfehler Dateien liessen sich nicht vermessen"
 
-  # bpp und Urteil ergaenzen
+  # bpp und Urteil ergaenzen. Die erwarteten Groessen kommen aus der
+  # Profiltabelle -- frueher standen hier eigene Konstanten aus einer
+  # aelteren Messreihe, und scan und run nannten verschiedene Zahlen.
   LC_ALL=C awk -F'\t' -v OFS='\t' \
       -v s="$VIDEO_SCHWELLE" -v sm="$VIDEO_SCHWELLE_MODERN" \
-      -v bs="$VIDEO_BPP_SCHNELL" -v bp="$VIDEO_BPP_SPARSAM" \
+      -v bs="$(video_profil_feld schnell 3)" -v bp="$(video_profil_feld sparsam 3)" \
       -v mg="$VIDEO_MINDESTGEWINN_KB" '
     {
       status=$1; pfad=$2; verpackt=$3; codec=$4; w=$5; h=$6; fps=$7; dauer=$8; kb=$9; rohkb=$10
@@ -284,7 +279,8 @@ video_bericht() {
   [ "$n_ger" -gt 0 ]  && info "  ${grau}$n_ger Dateien wären zwar üppig kodiert, brächten aber je unter $(mb "$VIDEO_MINDESTGEWINN_KB") — nicht vorgeschlagen.${aus}"
   [ "$n_zeit" -gt 0 ] && info "  ${grau}$n_zeit Zeitraffer (unter 5 fps) — dort ist die Kennzahl nicht aussagekräftig, bitte selbst ansehen.${aus}"
 
-  LC_ALL=C awk -F'\t' -v ts="$VIDEO_TEMPO_SCHNELL" -v tp="$VIDEO_TEMPO_SPARSAM" '
+  LC_ALL=C awk -F'\t' -v ts="$(( $(video_profil_feld schnell 4) * 1000000 ))" \
+      -v tp="$(( $(video_profil_feld sparsam 4) * 1000000 ))" '
     { gesamt_kb += $9
       if ($12=="lohnt") {
         n++; belegt += $9; schnell += $13; sparsam += $14
