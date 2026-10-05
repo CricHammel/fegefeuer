@@ -217,6 +217,13 @@ von einer Datei schon eine eigene Fassung, bleibt die alte im Stapel und im
 Manifest. Früher wurde der Stapelordner nach dem Ergänzen komplett entfernt —
 mitsamt genau diesen alten Fassungen.
 
+Dasselbe gilt in der Gegenrichtung. `apply` arbeitet die Freigaben nach Pfad
+ab, damit ein Ordner vor allem wandert, was in ihm liegt, und es mitnimmt.
+Früher galt die Reihenfolge der Liste: Eine große Datei in einem
+freigegebenen Playwright-Build ging zuerst, der Build landete danach in
+`chromium-1/chromium-1`, und `restore` holte nur die Datei zurück. Ist der
+Zielpfad im Stapel trotzdem belegt, verweigert `apply` den Eintrag.
+
 **Ein freigegebener Ordner nimmt nichts Behaltenes mit.** Wenn du
 `~/Library/Caches/ms-playwright` freigibst, darin aber `chromium-1234`
 ausdrücklich behalten wolltest, würde `mv` den Unterordner kommentarlos

@@ -12,8 +12,6 @@ befehl_apply() {
   local stapel; stapel="$(date '+%Y-%m-%d_%H%M%S')"
   local ziel="$QUARANTAENE/$stapel"
   local manifest="$ziel/_manifest.tsv"
-  mkdir -p "$ziel"
-  : > "$manifest"
 
   local platz; platz="$(summe_echt go)"
   info "\n${fett}$anzahl Einträge${aus} ($(mb "$platz")) → Quarantäne"
@@ -21,6 +19,10 @@ befehl_apply() {
   printf 'Fortfahren? [j/N] '
   local ok; read -r ok || ok=n
   case "$ok" in j|J) ;; *) info "Abgebrochen."; return 0;; esac
+  # Erst nach dem Ja anlegen -- sonst bliebe nach einem Nein ein leerer
+  # Stapel liegen.
+  mkdir -p "$ziel"
+  : > "$manifest"
 
   # Ein 'go'-Ordner darf nichts mitnehmen, was ausdruecklich behalten werden
   # soll -- mv wuerde den Unterordner sonst kommentarlos mitverschieben.
@@ -69,12 +71,19 @@ befehl_apply() {
   local bleibliste="$ARBEIT/apply_bleibt.txt"
   { cat "$keepliste"; cut -f2 "$dub_schutz"; } > "$bleibliste"
 
+  # Nach Pfad sortiert abarbeiten: Ein Ordner kommt so vor allem, was in ihm
+  # liegt, und nimmt es mit. In der Reihenfolge der Liste (nach Kategorie)
+  # wanderte eine "gross"-Datei vor ihrem "toolchain"-Ordner, und der Ordner
+  # landete danach in der Huelle, die sie angelegt hatte.
+  local reihenfolge="$ARBEIT/apply_reihenfolge.tsv"
+  LC_ALL=C sort -t$'\t' -k5,5 "$KANDIDATEN" > "$reihenfolge"
+
   local verschoben=0 fehlgeschlagen=0 blockiert=0 mitgewandert=0 widerspruch=0 dub_gehalten=0
   local dub_gemeldet=""
   local -a neu=()
   while IFS= read -r zeile <&3; do
     local st kt kb mt pfad grund grp etikett
-    IFS=$'\t' read -r st kt kb mt pfad grund grp etikett <<< "$zeile"
+    felder_lesen "$zeile" st kt kb mt pfad grund grp etikett
     if [ "$st" != "go" ]; then neu+=("$zeile"); continue; fi
     if ist_geschuetzt "$pfad"; then
       warn "geschützt, übersprungen: $pfad"; neu+=("$(status_setzen "$zeile" keep)"); continue
@@ -125,6 +134,14 @@ befehl_apply() {
     fi
     local rel="${pfad#$HOME/}"
     local zielpfad="$ziel/$rel"
+    # Nie auf einen belegten Pfad verschieben: mv legte einen Ordner sonst
+    # in den vorhandenen hinein, und restore holte ihn nur halb zurueck.
+    if [ -e "$zielpfad" ] || [ -L "$zielpfad" ]; then
+      fehlgeschlagen=$((fehlgeschlagen+1))
+      printf '  %s✗%s %s %s(in der Quarantäne schon belegt)%s\n' "$rot" "$aus" "${pfad/#$HOME/$TILDE}" "$grau" "$aus"
+      neu+=("$zeile")
+      continue
+    fi
     mkdir -p "$(dirname "$zielpfad")"
     if mv "$pfad" "$zielpfad" 2>/dev/null; then
       manifest_zeile "$rel" "$pfad" "$kb" "verschoben" "$kt" >> "$manifest"
@@ -135,9 +152,12 @@ befehl_apply() {
       printf '  %s✗%s %s %s(keine Berechtigung?)%s\n' "$rot" "$aus" "${pfad/#$HOME/$TILDE}" "$grau" "$aus"
       neu+=("$zeile")
     fi
-  done 3< "$KANDIDATEN"
+  done 3< "$reihenfolge"
+  rm -f "$reihenfolge"
 
+  # Zurueck in die gewohnte Ordnung: Kategorie, dann Groesse
   schreibe_kandidaten "${neu[@]+"${neu[@]}"}"
+  sort -t$'\t' -k2,2 -k3,3nr "$KANDIDATEN" -o "$KANDIDATEN"
   [ "$blockiert" -gt 0 ] && warn "$blockiert übersprungen, weil sie Behaltenes enthalten"
   [ "$widerspruch" -gt 0 ] && warn "$widerspruch Einträge waren zugleich freigegeben und behalten — sie bleiben"
   [ "$dub_gehalten" -gt 0 ] && warn "$dub_gehalten Dubletten-Einträge nicht angefasst, damit von jeder Gruppe eine Kopie bleibt"
@@ -168,7 +188,9 @@ befehl_apply() {
 # kategorie ist die aus kandidaten.tsv (cache, app-rest, ...) oder "video".
 # Aeltere Stapel haben die Spalte nicht; dort ist sie leer und gilt als
 # unbekannt.
-manifest_zeile() { printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "${5:-}"; }
+# kb nie leer schreiben: Die Leser zerlegen mit IFS=Tab, und ein leeres Feld
+# in der Mitte schoebe art und kategorie um eine Spalte nach vorn.
+manifest_zeile() { printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "${3:-0}" "$4" "${5:-}"; }
 
 # Bei welchen Kategorien macht ein Nachwachsen am Originalort die alte Fassung
 # entbehrlich? Nur bei Caches und Toolchains -- die baut das System selbst

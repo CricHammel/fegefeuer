@@ -87,6 +87,83 @@ test_apply_schutzliste() {
   pruefe "geschützter Eintrag wird auf keep gesetzt" gleich "$(status_von "$H/.ssh")" keep
 }
 
+# Die Liste ist nach Kategorie sortiert, und "gross" kommt vor "toolchain".
+# Eine grosse Datei in einem freigegebenen Ordner wanderte deshalb zuerst --
+# und der Ordner danach in die von ihr angelegte Huelle: chromium-1/chromium-1.
+test_apply_kind_vor_elternordner() {
+  sandbox
+  local p="$H/Library/Caches/ms-playwright/chromium-1"
+  mkdir -p "$p/sub"
+  echo inhalt > "$p/andere.txt"
+  echo gross > "$p/sub/Framework"
+  kandidat go gross 5 "$p/sub/Framework"
+  kandidat go toolchain 10 "$p"
+  echo j | ff apply > /dev/null
+  local s; s="$(stapel)"
+  local qp="$Q/$s/Library/Caches/ms-playwright/chromium-1"
+  pruefe "nicht in sich selbst verschachtelt" nicht test -e "$qp/chromium-1"
+  pruefe "Ordner liegt vollständig in der Quarantäne" test -f "$qp/andere.txt"
+  pruefe "die Datei darin auch" test -f "$qp/sub/Framework"
+  pruefe "nur der Ordner steht im Manifest" gleich "$(wc -l < "$Q/$s/_manifest.tsv" | tr -d ' ')" 1
+
+  ff restore "$s" > /dev/null
+  pruefe "restore bringt den Ordner zurück" test -f "$p/andere.txt"
+  pruefe "restore bringt die Datei darin zurück" test -f "$p/sub/Framework"
+  pruefe "der Stapel ist danach leer und entfernt" nicht test -d "$Q/$s"
+}
+
+test_apply_behaltenes_im_ordner() {
+  sandbox
+  local p="$H/Library/Caches/ms-playwright"
+  mkdir -p "$p/chromium-1" "$p/chromium-2"
+  kandidat go cache 20 "$p"
+  kandidat keep toolchain 10 "$p/chromium-1"
+  local ausgabe; ausgabe="$(echo j | ff apply)"
+  pruefe "Ordner mit Behaltenem bleibt liegen" test -d "$p/chromium-2"
+  pruefe "das Behaltene auch" test -d "$p/chromium-1"
+  pruefe "apply nennt den Grund" enthaelt "$ausgabe" "das du behalten wolltest"
+}
+
+# "mark gross go" kann auch die behaltene Kopie einer Dublette freigeben.
+# apply muss die ganze Gruppe dann in Ruhe lassen.
+test_apply_letzte_dublette_bleibt() {
+  sandbox
+  mkdir -p "$H/a" "$H/b"
+  echo gleich > "$H/a/film.bin"; echo gleich > "$H/b/film.bin"
+  printf 'keep\tdublette\t300\t2026-01-01\t%s\tTest\tdub-1\t2x film.bin\n' "$H/a/film.bin" >> "$D/kandidaten.tsv"
+  printf 'go\tdublette\t300\t2026-01-01\t%s\tTest\tdub-1\t2x film.bin\n' "$H/b/film.bin" >> "$D/kandidaten.tsv"
+  kandidat go gross 300 "$H/a/film.bin"
+  echo j | ff apply > /dev/null
+  pruefe "die behaltene Kopie bleibt" test -f "$H/a/film.bin"
+  pruefe "die freigegebene wandert" nicht test -e "$H/b/film.bin"
+}
+
+test_apply_abbruch_ohne_stapel() {
+  sandbox
+  mkdir -p "$H/Library/Caches/foo"
+  kandidat go cache 10 "$H/Library/Caches/foo"
+  local ausgabe; ausgabe="$(echo n | ff apply)"
+  pruefe "meldet den Abbruch" enthaelt "$ausgabe" "Abgebrochen"
+  pruefe "legt keinen leeren Stapel an" gleich "$(stapel)" ""
+  pruefe "lässt den Ordner liegen" test -d "$H/Library/Caches/foo"
+}
+
+# IFS=Tab fasst aufeinanderfolgende Tabs zusammen: Ein leeres Groessenfeld
+# schob den Pfad in die Spalte davor, und apply hielt die Begruendung fuer
+# den Pfad.
+test_apply_leeres_groessenfeld() {
+  sandbox
+  local p="$H/Library/Caches/foo"
+  mkdir -p "$p"
+  kandidat go cache "" "$p"
+  echo j | ff apply > /dev/null
+  local s; s="$(stapel)"
+  pruefe "Eintrag ohne Größe wird verschoben" nicht test -e "$p"
+  pruefe "und liegt in der Quarantäne" test -d "$Q/$s/Library/Caches/foo"
+  pruefe "Manifest hat fünf Spalten mit Größe 0" \
+    gleich "$(awk -F'\t' '{ print NF "/" $3 "/" $4 "/" $5 }' "$Q/$s/_manifest.tsv" 2>/dev/null)" "5/0/verschoben/cache"
+}
+
 # ---------- Ablauf ----------
 
 filter="${1:-}"
