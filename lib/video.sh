@@ -77,12 +77,16 @@ video_ffmpeg() {   # video_ffmpeg <dauer_s> <text> <ffmpeg-argumente...>
 
 # Schaetzt fuer alle 'go'-Eintraege der Liste: belegt, danach, Minuten.
 # ziel_h = 0 heisst Auflösung beibehalten, sonst auf diese Höhe verkleinern.
-video_schaetzen() {   # video_schaetzen <profil> <ziel_hoehe> -> "belegt danach minuten"
+# auswahl "go" (Standard) rechnet ueber die freigegebenen Dateien -- das
+# braucht video run. "lohnt" rechnet ueber alle vorgeschlagenen -- das
+# braucht der Bericht nach video scan. Beide ueber dieselbe Rechnung, damit
+# sie fuer dieselben Dateien dieselben Zahlen nennen.
+video_schaetzen() {   # video_schaetzen <profil> <ziel_hoehe> [go|lohnt] -> "belegt danach minuten"
   local bpp mpxs
   bpp="$(video_profil_feld "$1" 3)"
   mpxs="$(video_profil_feld "$1" 4)"
-  LC_ALL=C awk -F'\t' -v bpp="$bpp" -v mpxs="$mpxs" -v zh="${2:-0}" '
-    $1=="go" {
+  LC_ALL=C awk -F'\t' -v bpp="$bpp" -v mpxs="$mpxs" -v zh="${2:-0}" -v auswahl="${3:-go}" '
+    (auswahl == "lohnt" ? $12 == "lohnt" : $1 == "go") {
       w=$5; h=$6; fps=$7; dauer=$8; kb=$9
       aw=w; ah=h
       if (zh > 0 && h > zh) { ah = zh; aw = int(w * zh / h / 2) * 2 }
@@ -279,25 +283,25 @@ video_bericht() {
   [ "$n_ger" -gt 0 ]  && info "  ${grau}$n_ger Dateien wären zwar üppig kodiert, brächten aber je unter $(mb "$VIDEO_MINDESTGEWINN_KB") — nicht vorgeschlagen.${aus}"
   [ "$n_zeit" -gt 0 ] && info "  ${grau}$n_zeit Zeitraffer (unter 5 fps) — dort ist die Kennzahl nicht aussagekräftig, bitte selbst ansehen.${aus}"
 
-  LC_ALL=C awk -F'\t' -v ts="$(( $(video_profil_feld schnell 4) * 1000000 ))" \
-      -v tp="$(( $(video_profil_feld sparsam 4) * 1000000 ))" '
-    { gesamt_kb += $9
-      if ($12=="lohnt") {
-        n++; belegt += $9; schnell += $13; sparsam += $14
-        pxs = $5*$6*$7; zeit_s += pxs*$8/ts; zeit_p += pxs*$8/tp
-      } }
-    END { printf "%d\t%.2f\t%.2f\t%.2f\t%.1f\t%.1f\t%.2f\n", \
-            n, belegt/1048576, schnell/1048576, sparsam/1048576, zeit_s/60, zeit_p/60, gesamt_kb/1048576 }' \
-    "$VIDEOLISTE" | while IFS=$'\t' read -r n belegt sch spa zs zp ges; do
-      echo
-      info "  ${fett}$n Dateien vorgeschlagen${aus} — $(zahl "$belegt" 2) GB von $(zahl "$ges" 2) GB Videomaterial"
-      echo
-      printf "  %-10s %-22s %11s %11s %12s\n" "Profil" "Encoder" "danach" "gespart" "Rechenzeit"
-      printf "  %-10s %-22s %8s GB %8s GB %9s min\n" "schnell" "VideoToolbox q60" \
-        "$(zahl "$sch" 2)" "$(LC_ALL=C awk -v a="$belegt" -v b="$sch" 'BEGIN{t=sprintf("%.2f",a-b); sub(/\./,",",t); print t}')" "$(zahl "$zs" 1)"
-      printf "  %-10s %-22s %8s GB %8s GB %9s min\n" "sparsam" "x265 veryfast crf24" \
-        "$(zahl "$spa" 2)" "$(LC_ALL=C awk -v a="$belegt" -v b="$spa" 'BEGIN{t=sprintf("%.2f",a-b); sub(/\./,",",t); print t}')" "$(zahl "$zp" 1)"
-    done
+  # Alle Profile aus der Tabelle, gerechnet wie die Auswahl in video run.
+  # Frueher standen hier zwei Profile fest eingetippt; av1 und klein fehlten.
+  local n_lohnt belegt_kb gesamt_kb name danach minuten hinweis
+  read -r n_lohnt belegt_kb gesamt_kb <<< "$(LC_ALL=C awk -F'\t' '
+      { gesamt += $9 } $12=="lohnt" { n++; belegt += $9 }
+      END { printf "%d\t%d\t%d", n, belegt, gesamt }' "$VIDEOLISTE")"
+  echo
+  info "  ${fett}$n_lohnt Dateien vorgeschlagen${aus} — $(mb "$belegt_kb") von $(mb "$gesamt_kb") Videomaterial"
+  echo
+  printf "  %-10s %-22s %9s %11s %12s\n" "Profil" "Encoder" "danach" "gespart" "Rechenzeit"
+  for name in $(video_profil_namen); do
+    read -r _ danach minuten <<< "$(video_schaetzen "$name" 0 lohnt)"
+    printf "  %-10s %-22s %9s %11s %8s min\n" "$name" "$(video_profil_feld "$name" 1)" \
+      "$(mb "$danach")" "$(mb $((belegt_kb - danach)))" "$(zahl "$minuten" 1)"
+  done
+  for name in $(video_profil_namen); do
+    hinweis="$(video_profil_feld "$name" 5)"
+    [ -n "$hinweis" ] && info "  ${gelb}⚠ $name:${aus} ${grau}$hinweis${aus}"
+  done
   echo
   info "  ${grau}Geschätzt aus Messungen an einer 4K60-Datei; ruhige Aufnahmen werden kleiner,"
   info "  bewegte grösser. Es wurde noch nichts angefasst.${aus}"
