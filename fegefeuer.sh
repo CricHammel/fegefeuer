@@ -1362,17 +1362,15 @@ purge_wieder_da() {
 # Homebrew-Pakete lassen sich nicht sinnvoll in Quarantaene schieben.
 # Stattdessen: Vorschlagsliste erzeugen, die du selbst durchgehst.
 #
-# Formulas und Casks werden verschieden behandelt. Formulas, die niemand
-# sonst braucht, hast du einmal fuer einen Zweck installiert; wer die Liste
-# durchgeht, streicht, was bleiben soll. Casks sind Programme, die man
-# meistens benutzt -- dort waere "streichen, was bleibt" falsch herum. Sie
-# stehen auskommentiert in der Liste: entfernt wird nur, was du freischaltest.
+# Jede Zeile der Liste steht auskommentiert da: Entfernt wird nur, was du
+# freischaltest. Wer die Datei unveraendert ausfuehrt, aendert nichts.
 
 # Liest die JSON-Ausgabe von "brew info --cask --json=v2" und gibt je Cask
-# "token<TAB>version<TAB>App1;App2" aus. Fehlt die Version, steht "-" da:
-# read mit IFS=Tab fasst aufeinanderfolgende Tabs zusammen, ein leeres Feld
-# in der Mitte wuerde die Spalten dahinter verschieben. JavaScript ueber osascript, weil es
+# "token<TAB>version<TAB>App1;App2" aus. JavaScript ueber osascript, weil es
 # auf jedem Mac vorhanden ist -- jq oder Python sind es nicht.
+# Fehlt die Version, steht "-" da: read mit IFS=Tab fasst aufeinanderfolgende
+# Tabs zusammen, ein leeres Feld in der Mitte wuerde die Spalten dahinter
+# verschieben.
 brew_casks_lesen() {   # brew_casks_lesen <json-datei>
   osascript -l JavaScript - "$1" <<'JXA' 2>/dev/null
 function run(argv) {
@@ -1408,9 +1406,9 @@ befehl_brew() {
     echo "#!/usr/bin/env bash"
     echo "# Von fegefeuer.sh erzeugt am $(date '+%d.%m.%Y %H:%M')"
     echo "#"
-    echo "# Formulas: Zeilen loeschen, die du behalten willst."
-    echo "# Programme (Casks): stehen auskommentiert -- entfernt wird nur, was du"
-    echo "# freischaltest, indem du das # am Zeilenanfang loeschst."
+    echo "# Alle Zeilen stehen auskommentiert. Was weg soll, schaltest du frei,"
+    echo "# indem du das # am Zeilenanfang loeschst. Unveraendert ausgefuehrt"
+    echo "# aendert die Datei nichts."
     echo "#"
     echo "# Rueckgaengig jederzeit mit: brew install <name>"
     echo "#                        bzw. brew install --cask <name>"
@@ -1449,10 +1447,10 @@ befehl_brew() {
       [ "$mit" -gt 0 ] && zusatz="  ${grau}davon $(mb "$mit") Abhängigkeiten${aus}"
       printf '  %9s  %s  %s%s\n' "$(mb "$gesamt")" "$seit" "$name" "$zusatz"
       if [ "$mit" -gt 0 ]; then
-        printf 'brew uninstall %s   # %s (%s + %s Abhaengigkeiten), installiert %s\n' \
+        printf '# brew uninstall %s   # %s (%s + %s Abhaengigkeiten), installiert %s\n' \
           "$name" "$(mb "$gesamt")" "$(mb "$eigen")" "$(mb "$mit")" "$seit" >> "$liste"
       else
-        printf 'brew uninstall %s   # %s, installiert %s\n' "$name" "$(mb "$gesamt")" "$seit" >> "$liste"
+        printf '# brew uninstall %s   # %s, installiert %s\n' "$name" "$(mb "$gesamt")" "$seit" >> "$liste"
       fi
       n_formula=$((n_formula + 1))
     done < <(LC_ALL=C awk -F'\t' '
@@ -1473,18 +1471,10 @@ befehl_brew() {
             printf "%d\t%d\t%d\t%s\n", kb[l] + mit, kb[l], mit, l
           }
         }' FS='\t' "$groessen" FS=' ' "$abh" | sort -t$'\t' -k1,1nr)
-    {
-      echo
-      echo "# Danach Abhaengigkeiten entfernen, die niemand mehr braucht -- erst damit"
-      echo "# werden die oben genannten Abhaengigkeiten frei. Entfernt auch, was schon"
-      echo "# vorher verwaist war."
-      echo "brew autoremove"
-    } >> "$liste"
   fi
 
   # --- Casks ------------------------------------------------------------
   titel "Programme (Casks), nach Größe"
-  info "${grau}Nur zur Übersicht: In der Vorschlagsliste stehen sie auskommentiert.${aus}"
   info "${grau}Zuletzt geöffnet = laut Spotlight. \"unbekannt\" heißt nicht unbenutzt — Apps,"
   info "die sich selbst aktualisieren, verlieren den Eintrag oft.${aus}\n"
 
@@ -1571,10 +1561,21 @@ befehl_brew() {
     info "  ${grau}keine${aus}"
   fi
 
+  # Erst brew autoremove macht die Abhaengigkeiten frei, die oben mitgezaehlt
+  # sind. Es raeumt aber auch auf, was schon vorher verwaist war -- und soll
+  # deshalb nur laufen, wenn ueberhaupt etwas freigeschaltet ist. Sonst
+  # aenderte die unveraenderte Datei doch etwas.
+  {
+    echo
+    echo "# Zum Schluss Abhaengigkeiten entfernen, die niemand mehr braucht -- erst"
+    echo "# damit werden die oben genannten Abhaengigkeiten frei. Laeuft nur, wenn"
+    echo "# oben mindestens eine Zeile freigeschaltet ist."
+    echo "if grep -q '^brew uninstall' \"\$0\"; then brew autoremove; fi"
+  } >> "$liste"
   chmod +x "$liste"
   rm -f "$groessen" "$abh" "$json" "$casks"
-  info "\nVorschlagsliste: ${fett}$liste${aus}  ${grau}($n_formula Formulas, $n_cask Programme auskommentiert)${aus}"
-  info "${grau}Durchgehen, Zeilen löschen, die bleiben sollen, Programme bei Bedarf freischalten, dann ausführen.${aus}"
+  info "\nVorschlagsliste: ${fett}$liste${aus}  ${grau}($n_formula Formulas, $n_cask Programme)${aus}"
+  info "${grau}Alles steht auskommentiert. Was weg soll, freischalten (# entfernen), dann ausführen.${aus}"
   info "Platzsparen ohne Risiko: ${fett}brew cleanup${aus}"
 }
 

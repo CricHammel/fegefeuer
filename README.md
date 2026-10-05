@@ -287,7 +287,16 @@ brew cleanup                 # alte Versionen, risikolos
 Homebrew wird nicht in die Quarantäne verschoben — dort ist `brew uninstall`
 das richtige Werkzeug, und `brew install` macht es rückgängig. Der Unterbefehl
 zeigt, was du installiert hast, und schreibt eine Vorschlagsliste
-`brew-vorschlag.sh`. Formulas und Programme behandelt er verschieden.
+`brew-vorschlag.sh`.
+
+In der Liste steht jede Zeile auskommentiert. Was weg soll, schaltest du frei,
+indem du das `#` am Zeilenanfang löschst — bei Formulas wie bei Programmen
+gleich. Unverändert ausgeführt ändert die Datei nichts.
+
+```bash
+# brew uninstall powershell   # 744 MB (74 MB + 669 MB Abhaengigkeiten), installiert 2026-09-20
+brew uninstall --cask arc     # 858 MB, zuletzt geoeffnet: unbekannt   ← freigeschaltet
+```
 
 ### Formulas: nach dem, was wirklich frei wird
 
@@ -306,16 +315,15 @@ weit hinten, hält aber 669 MB `dotnet` fest. Abhängigkeiten, die sich zwei
 Pakete teilen, zählen bei keinem von beiden — sie werden erst frei, wenn
 beide gehen.
 
-In der Vorschlagsliste löschst du die Zeilen, die bleiben sollen. Am Ende
-steht `brew autoremove`; erst damit werden die Abhängigkeiten tatsächlich
-entfernt. Es nimmt auch mit, was schon vorher verwaist war.
+Am Ende der Liste steht `brew autoremove`; erst damit werden die
+Abhängigkeiten tatsächlich entfernt. Weil es auch mitnimmt, was schon vorher
+verwaist war, läuft es nur, wenn oben mindestens eine Zeile freigeschaltet
+ist — die Datei prüft das an sich selbst.
 
-### Programme (Casks): zur Übersicht
+### Programme (Casks): nach Größe und letzter Nutzung
 
-Programme benutzt man meistens — „streichen, was bleibt“ wäre hier falsch
-herum. Sie erscheinen nach Größe sortiert mit dem Datum, an dem sie zuletzt
-geöffnet wurden, und stehen in der Vorschlagsliste **auskommentiert**.
-Entfernt wird nur, was du ausdrücklich freischaltest.
+Programme erscheinen nach Größe sortiert, mit dem Datum, an dem sie zuletzt
+geöffnet wurden.
 
 ```
      2,2 GB  2026-09-28  docker-desktop
