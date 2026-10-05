@@ -267,7 +267,7 @@ Diese Pfade lehnt `apply` ab, selbst wenn sie als Kandidat markiert sind:
 - `~/Library/Keychains` — Passwörter
 - `~/Library/Mail`, `~/Library/Messages`, `~/Library/Containers/com.apple.mail*`
 - `~/Library/Mobile Documents` — iCloud Drive
-- `~/Pictures/*.photoslibrary`
+- Foto-Mediatheken (`*.photoslibrary`), wo immer sie liegen
 - `~/Library/Application Support/AddressBook` — Kontakte
 - `~/Library/Group Containers/group.com.apple.notes*` — Notizen
 - `~/Library/Group Containers/UBF8T346G9.*` und alles mit `OneDrive` im Pfad

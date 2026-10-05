@@ -164,6 +164,38 @@ test_apply_leeres_groessenfeld() {
     gleich "$(awk -F'\t' '{ print NF "/" $3 "/" $4 "/" $5 }' "$Q/$s/_manifest.tsv" 2>/dev/null)" "5/0/verschoben/cache"
 }
 
+# Das Muster */.photoslibrary/* traf nie: Die Mediathek heisst
+# "Photos Library.photoslibrary", vor dem Punkt steht kein Schraegstrich.
+# Mediatheken wurden komplett gehasht, und ausserhalb von ~/Pictures
+# schuetzte sie nichts.
+test_scan_fotomediathek_ausserhalb_bilder() {
+  sandbox
+  local m="$H/Archiv/Alt.photoslibrary/originals" d="$H/Dokumente"
+  mkdir -p "$m" "$d"
+  head -c 4096 /dev/urandom > "$m/a.jpg"; cp "$m/a.jpg" "$m/b.jpg"
+  mkfile -n 201m "$m/film.mov"
+  # Gegenprobe: dasselbe ausserhalb der Mediathek wird gefunden
+  head -c 4096 /dev/urandom > "$d/x.bin"; cp "$d/x.bin" "$d/y.bin"
+  mkfile -n 201m "$d/gross.bin"
+  ff scan --dubletten-ab 1k > /dev/null
+  pruefe "Gegenprobe: Dublette außerhalb gefunden" gleich "$(status_von "$d/x.bin")" neu
+  pruefe "Gegenprobe: große Datei außerhalb gefunden" gleich "$(status_von "$d/gross.bin")" neu
+  pruefe "nichts aus der Mediathek in der Liste" \
+    gleich "$(grep -c 'photoslibrary' "$D/kandidaten.tsv")" 0
+}
+
+test_apply_fotomediathek_geschuetzt() {
+  sandbox
+  local m="$H/Archiv/Alt.photoslibrary"
+  mkdir -p "$m/originals"
+  echo bild > "$m/originals/a.jpg"
+  kandidat go gross 300 "$m/originals/a.jpg"
+  kandidat go app-rest 10 "$m"
+  echo j | ff apply > /dev/null
+  pruefe "Datei in einer Mediathek bleibt" test -f "$m/originals/a.jpg"
+  pruefe "die Mediathek selbst bleibt" test -d "$m"
+}
+
 # ---------- Ablauf ----------
 
 filter="${1:-}"

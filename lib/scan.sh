@@ -143,7 +143,7 @@ befehl_scan() {
     kandidat_schreiben "gross" "$f" "große Einzeldatei — bitte einzeln prüfen"
     n=$((n+1))
   done < <(find "$HOME" -type f -size +200M ! -path "*/.Trash/*" \
-             ! -path "*/.photoslibrary/*" "${INTERN_AUSSCHLUSS[@]}" "${WOLKEN_AUSSCHLUSS[@]}" -print0 2>/dev/null)
+             "${MEDIATHEK_AUSSCHLUSS[@]}" "${INTERN_AUSSCHLUSS[@]}" "${WOLKEN_AUSSCHLUSS[@]}" -print0 2>/dev/null)
   fortschritt_ende
   info "  ${fett}$n${aus} gefunden"
 
@@ -158,7 +158,7 @@ befehl_scan() {
   find "$HOME" -type f -size +"$find_groesse" \
     ! -path "$HOME/Library/*" ! -path "*/.Trash/*" ! -path "*/node_modules/*" \
     ! -path "*/.git/*" ! -path "*/.nvm/*" ! -path "*/.pyenv/*" ! -path "*/.m2/*" \
-    ! -path "*/.cargo/*" ! -path "*/.photoslibrary/*" "${INTERN_AUSSCHLUSS[@]}" "${WOLKEN_AUSSCHLUSS[@]}" \
+    ! -path "*/.cargo/*" "${MEDIATHEK_AUSSCHLUSS[@]}" "${INTERN_AUSSCHLUSS[@]}" "${WOLKEN_AUSSCHLUSS[@]}" \
     -print0 2>/dev/null > "$dateiliste"
   local zu_hashen
   zu_hashen="$(tr -dc '\0' < "$dateiliste" | wc -c | tr -d ' ')"

@@ -156,7 +156,7 @@ befehl_video_scan() {
     -o -iname "*.mp4.zip" -o -iname "*.mov.zip" -o -iname "*.m4v.zip" \) \
     -size +20M \
     ! -path "*/Library/*" ! -path "*/.fegefeuer/*" ! -path "*/node_modules/*" \
-    ! -path "*/.Trash/*" ! -path "*.photoslibrary/*" "${WOLKEN_AUSSCHLUSS[@]}" \
+    ! -path "*/.Trash/*" "${MEDIATHEK_AUSSCHLUSS[@]}" "${WOLKEN_AUSSCHLUSS[@]}" \
     -print 2>/dev/null | sort > "$tmp"
   local gefunden; gefunden="$(wc -l < "$tmp" | tr -d ' ')"
   [ "$gefunden" -eq 0 ] && { info "  Keine Videos über 20 MB gefunden."; return 0; }

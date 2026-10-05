@@ -13,7 +13,7 @@ ist_geschuetzt() {
     "$HOME"/Library/Mail*|\
     "$HOME"/Library/Messages*|\
     "$HOME"/Library/Mobile\ Documents*|\
-    "$HOME"/Pictures/*.photoslibrary*|\
+    *.photoslibrary|*.photoslibrary/*|\
     "$HOME"/Library/Application\ Support/AddressBook*|\
     "$HOME"/Library/Group\ Containers/group.com.apple.notes*|\
     "$HOME"/Library/Containers/com.apple.mail*|\
@@ -48,6 +48,13 @@ ist_geschuetzt() {
 # nach sieben Tagen beide.
 INTERN_AUSSCHLUSS=(! -path "$HOME/.fegefeuer/*" ! -path "$HOME/.aufraeumen-quarantaene/*"
                    ! -path "$ARBEIT/*")
+
+# Foto-Mediatheken sind Pakete: Eine einzelne Datei daraus zu verschieben
+# beschaedigt die ganze Mediathek. Sie heissen "Name.photoslibrary" -- das
+# fruehere Muster */.photoslibrary/* traf deshalb nie. Und sie liegen nicht
+# nur in ~/Pictures.
+# Gegenstueck zum photoslibrary-Eintrag in ist_geschuetzt.
+MEDIATHEK_AUSSCHLUSS=(! -path "*.photoslibrary/*")
 
 # Cloud-Ordner gehoeren nicht nur diesem Rechner: Was hier verschwindet,
 # verschwindet auf dem Server, bei geteilten Ordnern fuer alle. Die Scans
