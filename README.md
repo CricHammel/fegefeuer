@@ -285,8 +285,8 @@ Geschützte Pfade fallen aus, *bevor* Dubletten gruppiert werden. Bleibt von
 einer Gruppe nur eine Datei übrig, ist sie keine Dublette mehr und taucht
 nicht auf.
 
-Die Liste steht in der Funktion `ist_geschuetzt` und will angepasst werden,
-wenn dein Rechner andere heikle Orte hat.
+Die Liste steht in `lib/schutz.sh` (Funktion `ist_geschuetzt`) und will
+angepasst werden, wenn dein Rechner andere heikle Orte hat.
 
 ## Homebrew
 
@@ -493,15 +493,27 @@ Start.
 
 | Datei | |
 |---|---|
-| `fegefeuer.sh` | das Skript |
-| `gruppen.awk` | Gruppierung der Library-Reste nach Programm |
+| `fegefeuer.sh` | Einstieg: Pfade, Module laden, Befehle verteilen, Hilfe |
+| `lib/gemeinsam.sh` | Ausgabe, Fortschrittsanzeige, Umgebungsprüfung, Tastenbelegung |
+| `lib/schutz.sh` | die Schutzliste und was die Scans auslassen |
+| `lib/kandidaten.sh` | Helfer für `kandidaten.tsv` |
+| `lib/scan.sh` | `scan` und der Bericht |
+| `lib/review.sh` | `review`, `mark`, `zeigen`, `gruppen` |
+| `lib/quarantaene.sh` | Manifest, `apply`, `list`, `restore`, `pruefen`, `purge` |
+| `lib/brew.sh` | `brew` |
+| `lib/video.sh` | `video scan`, `review`, `run` |
+| `lib/gruppen.awk` | Gruppierung der Library-Reste nach Programm |
 | `video-kandidaten.tsv` | vermessene Videos *(nicht im Repo)* |
 | `kandidaten.tsv` | deine Kandidaten und Entscheidungen *(nicht im Repo)* |
 | `bericht.md` | Übersicht nach jedem `scan` *(nicht im Repo)* |
 | `.arbeit/` | Hashes und Zwischenstände *(nicht im Repo)* |
 
 Alles, was Pfade dieses Rechners enthält, steht in `.gitignore`. Im Repo
-liegen nur das Skript und seine Gruppierungsregeln.
+liegen nur das Skript und seine Module.
+
+`fegefeuer.sh` findet die Module über sein eigenes Verzeichnis. Ein Aufruf
+über einen Symlink, etwa aus `~/bin`, funktioniert deshalb nicht; dafür einen
+Alias oder eine kleine Weiterleitung anlegen.
 
 ## Was es bewusst nicht tut
 
