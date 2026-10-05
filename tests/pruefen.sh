@@ -44,9 +44,10 @@ ff() {
 
 # Eine Zeile in die Kandidatenliste der Sandbox schreiben.
 # kb darf leer sein -- das kommt vor, wenn `du` an einem Pfad scheitert.
-kandidat() {   # kandidat <status> <kategorie> <kb> <pfad>
+# Ohne Gruppenschluessel bildet jeder Eintrag seine eigene Gruppe.
+kandidat() {   # kandidat <status> <kategorie> <kb> <pfad> [gruppe]
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$1" "$2" "$3" "2026-01-01" "$4" "Testeintrag" "$4" "test" >> "$D/kandidaten.tsv"
+    "$1" "$2" "$3" "2026-01-01" "$4" "Testeintrag" "${5:-$4}" "test" >> "$D/kandidaten.tsv"
 }
 
 status_von() {   # status_von <pfad> -> Status aus der Kandidatenliste
@@ -225,6 +226,45 @@ test_apply_leeres_groessenfeld() {
   pruefe "und liegt in der Quarantäne" test -d "$Q/$s/Library/Caches/foo"
   pruefe "Manifest hat fünf Spalten mit Größe 0" \
     gleich "$(awk -F'\t' '{ print NF "/" $3 "/" $4 "/" $5 }' "$Q/$s/_manifest.tsv" 2>/dev/null)" "5/0/verschoben/cache"
+}
+
+# Was in einem freigegebenen Ordner liegt, wandert mit und wird nicht mehr
+# gefragt. Beim einzelnen Durchgehen einer Gruppe (e) merkte sich review den
+# freigegebenen Ordner aber nicht -- sein Inhalt kam trotzdem noch dran.
+test_review_einzeln_freigegebener_ordner() {
+  sandbox
+  local app="$H/Library/Application Support/com.foo.app"
+  mkdir -p "$app/Cache" "$H/Library/Caches/com.foo.app"
+  kandidat neu app-rest 1000 "$app" foo
+  kandidat neu app-rest 500 "$H/Library/Caches/com.foo.app" foo
+  kandidat neu cache 10 "$app/Cache"
+  # e = einzeln, dann j fuer den Ordner, n fuer den Cache-Ordner der App.
+  # Danach ist die Eingabe zu Ende; eine weitere Frage hiesse q.
+  printf 'e\nj\nn\n' | ff review > /dev/null
+  pruefe "der freigegebene Ordner ist go" gleich "$(status_von "$app")" go
+  pruefe "der abgelehnte ist keep" gleich "$(status_von "$H/Library/Caches/com.foo.app")" keep
+  pruefe "was im freigegebenen liegt, wandert ohne Frage mit" gleich "$(status_von "$app/Cache")" go
+}
+
+# Kein Fehler, sondern Absicherung: Die uebrigen Wege zu einer Freigabe
+# laufen jetzt ueber dieselbe Funktion und sollen sich verhalten wie vorher.
+test_review_gruppe_und_dublette() {
+  sandbox
+  local app="$H/Library/Application Support/com.foo.app"
+  mkdir -p "$app/Cache" "$H/Library/Caches/com.foo.app" "$H/a" "$H/b"
+  echo gleich > "$H/a/f.bin"; echo gleich > "$H/b/f.bin"
+  kandidat neu app-rest 1000 "$app" foo
+  kandidat neu app-rest 500 "$H/Library/Caches/com.foo.app" foo
+  kandidat neu dublette 300 "$H/a/f.bin" dub-1
+  kandidat neu dublette 300 "$H/b/f.bin" dub-1
+  kandidat neu cache 10 "$app/Cache"
+  # j = ganze Gruppe weg, 2 = von den Dubletten die zweite behalten
+  printf 'j\n2\n' | ff review > /dev/null
+  pruefe "Gruppe: erster Eintrag go" gleich "$(status_von "$app")" go
+  pruefe "Gruppe: zweiter Eintrag go" gleich "$(status_von "$H/Library/Caches/com.foo.app")" go
+  pruefe "Inhalt des freigegebenen Ordners ohne Frage go" gleich "$(status_von "$app/Cache")" go
+  pruefe "von den Dubletten genau eine behalten, eine frei" \
+    gleich "$(status_von "$H/a/f.bin") $(status_von "$H/b/f.bin")" "go keep"
 }
 
 # Das Muster */.photoslibrary/* traf nie: Die Mediathek heisst

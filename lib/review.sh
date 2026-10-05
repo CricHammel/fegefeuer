@@ -13,6 +13,18 @@ R_ABBRUCH=0
 R_NR=0
 R_GESAMT=0
 
+# Gibt einen Eintrag frei und merkt sich seinen Pfad: Was darin liegt, wandert
+# mit und wird danach nicht mehr gefragt. Alle Freigaben laufen hierueber --
+# frueher stand das Merken an jeder Stelle einzeln und fehlte beim einzelnen
+# Durchgehen einer Gruppe.
+r_freigeben() {   # r_freigeben <zeile>
+  local st kt kb mt pfad
+  felder_lesen "$1" st kt kb mt pfad
+  R_AUSGABE+=("$(status_setzen "$1" go)")
+  R_GO_PFADE="$R_GO_PFADE
+$pfad"
+}
+
 r_einzeln_fragen() {   # r_einzeln_fragen <zeile>  -> Antwort in R_ANTWORT
   local zeile="$1"
   local st kt kb mt pfad grund
@@ -70,7 +82,7 @@ r_gruppe_abschliessen() {
   done
   if [ "$alle_drin" -eq 1 ]; then
     for zeile in "${offen[@]}"; do
-      R_AUSGABE+=("$(status_setzen "$zeile" go)")
+      r_freigeben "$zeile"
       R_UEBERDECKT=$((R_UEBERDECKT + 1))
     done
     return 0
@@ -122,10 +134,7 @@ r_gruppe_abschliessen() {
               if [ "$i" -eq "$k" ]; then
                 R_AUSGABE+=("$(status_setzen "$zeile" keep)")
               else
-                R_AUSGABE+=("$(status_setzen "$zeile" go)")
-                felder_lesen "$zeile" st kt kb mt pfad
-                R_GO_PFADE="$R_GO_PFADE
-$pfad"
+                r_freigeben "$zeile"
               fi
             done
             return 0
@@ -156,9 +165,7 @@ $pfad"
       printf '  → '
       read -r antwort || antwort=q
       case "$antwort" in
-        j|J) R_AUSGABE+=("$(status_setzen "${offen[0]}" go)")
-             R_GO_PFADE="$R_GO_PFADE
-$pfad1"; return 0;;
+        j|J) r_freigeben "${offen[0]}"; return 0;;
         n|N) R_AUSGABE+=("$(status_setzen "${offen[0]}" keep)"); return 0;;
         o|O) open -R "$pfad1" 2>/dev/null;;
         s|S|"") R_AUSGABE+=("${offen[0]}"); return 0;;
@@ -192,12 +199,7 @@ $pfad1"; return 0;;
     printf '  → '
     read -r antwort || antwort=q
     case "$antwort" in
-      j|J) for zeile in "${offen[@]}"; do
-             R_AUSGABE+=("$(status_setzen "$zeile" go)")
-             felder_lesen "$zeile" st kt kb mt pfad
-             R_GO_PFADE="$R_GO_PFADE
-$pfad"
-           done; return 0;;
+      j|J) for zeile in "${offen[@]}"; do r_freigeben "$zeile"; done; return 0;;
       n|N) for zeile in "${offen[@]}"; do R_AUSGABE+=("$(status_setzen "$zeile" keep)"); done; return 0;;
       o|O) open -R "$pfad1" 2>/dev/null;;
       s|S|"") for zeile in "${offen[@]}"; do R_AUSGABE+=("$zeile"); done; return 0;;
@@ -209,7 +211,7 @@ $pfad"
           R_ANTWORT=""
           r_einzeln_fragen "$zeile"
           case "$R_ANTWORT" in
-            j|J) R_AUSGABE+=("$(status_setzen "$zeile" go)");;
+            j|J) r_freigeben "$zeile";;
             n|N) R_AUSGABE+=("$(status_setzen "$zeile" keep)");;
             q|Q) R_ABBRUCH=1; R_AUSGABE+=("$zeile");;
             *)   R_AUSGABE+=("$zeile");;
