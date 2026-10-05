@@ -466,7 +466,19 @@ Zwei naheliegende Ideen habe ich vermessen und verworfen:
 Kodiert wird in eine Nebendatei. Erst wenn sie **alle** Prüfungen besteht,
 wandert das Original ins Fegefeuer und die neue Fassung nimmt seinen Platz
 ein. Fällt eine durch, wird die neue Datei verworfen und das Original bleibt
-unberührt.
+unberührt. Lässt sich die neue Fassung nicht an den Platz legen, kommt das
+Original zurück.
+
+Der freie Platz wird **vor jeder Datei** geprüft, nicht einmal vorab. Die
+Originale bleiben bis `purge` auf derselben Platte, und jede neue Fassung
+kommt hinzu — auf einer fast vollen Platte lief ein langer Lauf früher in den
+Platzmangel. Gebraucht wird die Größe des Originals plus 1 GB Luft; reicht
+das nicht, endet der Lauf, und die übrigen Videos bleiben freigegeben.
+
+ZIPs mit mehr als einer Datei fasst `video` nicht an. Aus ihnen würde nur
+die erste Datei kodiert, die neue Fassung ersetzte aber das ganze ZIP — die
+übrigen Dateien lägen danach nur noch im Fegefeuer, bis `purge` sie löscht.
+Ordner und die Beigaben des Finders (`__MACOSX`, `.DS_Store`) zählen nicht.
 
 | Prüfung | fängt ab |
 |---|---|

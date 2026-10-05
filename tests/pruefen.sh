@@ -16,7 +16,9 @@
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-WURZEL="$(mktemp -d "${TMPDIR:-/tmp}/fegefeuer-test.XXXXXX")"
+# Ueber cd und pwd geglaettet: $TMPDIR endet unter macOS auf /, und ein HOME
+# mit // darin vergliche sich nicht mit den Pfaden, die das Skript bildet.
+WURZEL="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/fegefeuer-test.XXXXXX")" && pwd)"
 trap 'rm -rf "$WURZEL"' EXIT
 
 T=$'\t'
@@ -90,6 +92,34 @@ video_freigeben() {   # video_freigeben <pfad>
   kb="$(du -sk "$p" | cut -f1)"
   printf 'go\t%s\tnein\th264\t%s\t%s\t30\t%s\t%s\t%s\t0.5\tlohnt\t0\t0\n' \
     "$p" "${masse%,*}" "${masse#*,}" "$dauer" "$kb" "$kb" >> "$D/video-kandidaten.tsv"
+}
+
+# Ein unkomprimiertes Video: schnell erzeugt und ueber den 20 MB, ab denen
+# video scan sucht (640x360, 3 s, rund 40 MB).
+rohvideo() {   # rohvideo <datei.mov>
+  ffmpeg -v error -f lavfi -i testsrc2=size=640x360:rate=30 -t 3 \
+    -c:v rawvideo -pix_fmt uyvy422 -y "$1"
+}
+
+# Ein df, das der Reihe nach die uebergebenen freien KB meldet -- einen Wert
+# je Aufruf, der letzte gilt fuer alle weiteren. Die Sandbox legt es vorne
+# in den PATH: PATH="$(falsches_df ...):$PATH" ff ...
+falsches_df() {   # falsches_df <kb> [kb ...] -> Verzeichnis mit dem df
+  local bin="$WURZEL/$aktuell/bin" zaehler="$WURZEL/$aktuell/df_aufrufe"
+  mkdir -p "$bin"
+  printf '%s\n' "$@" > "$WURZEL/$aktuell/df_werte"
+  : > "$zaehler"
+  cat > "$bin/df" <<DF
+#!/bin/bash
+echo x >> "$zaehler"
+n=\$(wc -l < "$zaehler")
+frei=\$(sed -n "\${n}p" "$WURZEL/$aktuell/df_werte")
+[ -n "\$frei" ] || frei=\$(tail -1 "$WURZEL/$aktuell/df_werte")
+echo "Filesystem 1024-blocks Used Available Capacity Mounted on"
+echo "/dev/test 999999999 0 \$frei 1% /"
+DF
+  chmod +x "$bin/df"
+  printf '%s' "$bin"
 }
 
 video_status() {   # video_status <pfad> -> Status aus der Videoliste
@@ -299,6 +329,68 @@ test_video_metadaten_bleiben() {
   pruefe "Aufnahmedatum der Kamera bleibt" enthaelt "$tags" "creationdate=2019-07-14T18:03:00"
   pruefe "Änderungsdatum der Datei bleibt" gleich "$(stat -f '%Sm' -t '%Y-%m-%d' "$neu" 2>/dev/null)" 2019-07-14
   pruefe "Erstellungsdatum der Datei bleibt" gleich "$(stat -f '%SB' -t '%Y-%m-%d' "$neu" 2>/dev/null)" 2019-07-14
+}
+
+# find liefert relative Pfade, wenn es einen relativen Ordner bekommt. Die
+# Schutzliste haelt alles, was nicht mit $HOME/ beginnt, fuer ausserhalb --
+# video run uebersprang dann jede einzelne Datei als geschuetzt.
+test_video_scan_relativer_pfad() {
+  sandbox
+  hat_ffmpeg || { ueberspringen "kein ffmpeg"; return 0; }
+  mkdir -p "$H/Film"
+  rohvideo "$H/Film/roh.mov"
+  ( cd "$H" && ff video scan Film > /dev/null )
+  pruefe "Pfad steht absolut in der Liste" \
+    gleich "$(cut -f2 "$D/video-kandidaten.tsv" 2>/dev/null)" "$H/Film/roh.mov"
+}
+
+# Aus einem ZIP wurde nur die erste Datei kodiert, ersetzt aber das ganze
+# ZIP. Die uebrigen lagen danach nur noch im Fegefeuer -- bis purge.
+test_video_scan_zip_mehrere_dateien() {
+  sandbox
+  hat_ffmpeg || { ueberspringen "kein ffmpeg"; return 0; }
+  local z="$WURZEL/$aktuell/zip"
+  mkdir -p "$H/Film" "$z"
+  rohvideo "$z/a.mov"; cp "$z/a.mov" "$z/b.mov"
+  ( cd "$z" && zip -q -0 "$H/Film/zwei.mov.zip" a.mov b.mov && zip -q -0 "$H/Film/eins.mov.zip" a.mov )
+  local ausgabe; ausgabe="$(ff video scan "$H/Film")"
+  pruefe "ZIP mit einer Datei wird vermessen" grep -q "eins.mov.zip" "$D/video-kandidaten.tsv"
+  pruefe "ZIP mit zwei Dateien nicht" nicht grep -q "zwei.mov.zip" "$D/video-kandidaten.tsv"
+  pruefe "scan nennt es" enthaelt "$ausgabe" "mehr als eine Datei"
+}
+
+# Dasselbe in video run, fuer Listen aus einem frueheren scan
+test_video_run_zip_mehrere_dateien() {
+  sandbox
+  hat_ffmpeg || { ueberspringen "kein ffmpeg"; return 0; }
+  local z="$WURZEL/$aktuell/zip" p="$H/Film/zwei.mov.zip"
+  mkdir -p "$H/Film" "$z"
+  rohvideo "$z/a.mov"; cp "$z/a.mov" "$z/b.mov"
+  ( cd "$z" && zip -q -0 "$p" a.mov b.mov )
+  printf 'go\t%s\tja\th264\t640\t360\t30\t3.0\t%s\t%s\t1\tlohnt\t0\t0\n' \
+    "$p" "$(du -sk "$p" | cut -f1)" "$(du -sk "$p" | cut -f1)" >> "$D/video-kandidaten.tsv"
+  local ausgabe; ausgabe="$(echo j | ff video run --profil sparsam)"
+  pruefe "ZIP bleibt am Platz" test -f "$p"
+  pruefe "bleibt freigegeben" gleich "$(video_status "$p")" go
+  pruefe "run nennt den Grund" enthaelt "$ausgabe" "mehr als eine Datei"
+  pruefe "kein Stapel angelegt" gleich "$(stapel)" ""
+}
+
+# Der Platz wurde einmal vorab geprueft. Die Originale bleiben aber im
+# Fegefeuer auf derselben Platte, jede neue Fassung kommt hinzu -- auf einer
+# fast vollen Platte lief der Lauf in den Platzmangel hinein.
+test_video_run_platz_je_datei() {
+  sandbox
+  hat_ffmpeg || { ueberspringen "kein ffmpeg"; return 0; }
+  mkdir -p "$H/Film"
+  testvideo "$H/Film/a.mp4"; testvideo "$H/Film/b.mp4"
+  video_freigeben "$H/Film/a.mp4"; video_freigeben "$H/Film/b.mp4"
+  local bin; bin="$(falsches_df 5242880 1000)"
+  local ausgabe; ausgabe="$(echo j | PATH="$bin:$PATH" ff video run --profil sparsam)"
+  pruefe "erste Datei kodiert" gleich "$(video_status "$H/Film/a.mp4")" fertig
+  pruefe "zweite nicht, der Platz reicht nicht mehr" gleich "$(video_status "$H/Film/b.mp4")" go
+  pruefe "ihr Original bleibt am Platz" test -f "$H/Film/b.mp4"
+  pruefe "run nennt den Grund" enthaelt "$ausgabe" "Zu wenig Platz"
 }
 
 # ---------- Ablauf ----------

@@ -153,10 +153,26 @@ video_vermessen() {
 
 freier_platz_kb() { df -k "${1:-$HOME}" 2>/dev/null | tail -1 | awk '{print $4}'; }
 
+# Liegt genau eine Datei im ZIP? Nur dann darf die neue Fassung das ZIP
+# ersetzen -- sonst laegen die uebrigen Dateien nur noch im Fegefeuer, bis
+# purge sie loescht. Ordnereintraege und die Beigaben des Finders
+# (__MACOSX, .DS_Store) zaehlen nicht.
+zip_einzeldatei() {   # zip_einzeldatei <zip>
+  local n
+  n="$(LC_ALL=C unzip -Z1 "$1" 2>/dev/null | grep -v '/$' | grep -v '^__MACOSX/' \
+       | grep -vE '(^|/)\.DS_Store$' | wc -l | tr -d ' ')"
+  [ "$n" -eq 1 ]
+}
+
 befehl_video_scan() {
   video_werkzeuge_pruefen || return 1
   local wurzel="${1:-$HOME}"
   [ -d "$wurzel" ] || { fehler "Kein Verzeichnis: $wurzel"; return 1; }
+  # Absolut machen: find gaebe zu einem relativen Ordner relative Pfade aus,
+  # und die Schutzliste hielte sie fuer ausserhalb des Home -- video run
+  # uebersprang dann jede Datei. pwd ohne -P, damit der Pfad mit $HOME
+  # beginnt, auch wenn darin ein Symlink steckt.
+  wurzel="$(cd "$wurzel" && pwd)"
 
   titel "Videos suchen unter ${wurzel/#$HOME/$TILDE}"
   local tmp="$ARBEIT/video_fund.txt"
@@ -194,7 +210,7 @@ befehl_video_scan() {
   fortschritt_start
   local entpackordner="$ARBEIT/video_tmp"
   rm -rf "$entpackordner"; mkdir -p "$entpackordner"
-  local i=0 messfehler=0
+  local i=0 messfehler=0 mehrteilig=0
   while IFS= read -r pfad; do
     i=$((i+1))
     fortschritt "$i" "$gefunden" "Videos vermessen"
@@ -202,6 +218,7 @@ befehl_video_scan() {
     case "$pfad" in
       *.zip)
         verpackt="ja"
+        zip_einzeldatei "$pfad" || { mehrteilig=$((mehrteilig+1)); continue; }
         rm -rf "$entpackordner"; mkdir -p "$entpackordner"
         unzip -o -q "$pfad" -d "$entpackordner" 2>/dev/null
         temp="$(find "$entpackordner" -type f -size +1M 2>/dev/null | head -1)"
@@ -230,6 +247,7 @@ befehl_video_scan() {
   rm -rf "$entpackordner"
   fortschritt_ende
   [ "$messfehler" -gt 0 ] && warn "$messfehler Dateien liessen sich nicht vermessen"
+  [ "$mehrteilig" -gt 0 ] && warn "$mehrteilig ZIPs enthalten mehr als eine Datei — nicht vorgeschlagen, sonst ersetzte ein Video das ganze ZIP"
 
   # bpp und Urteil ergaenzen. Die erwarteten Groessen kommen aus der
   # Profiltabelle -- frueher standen hier eigene Konstanten aus einer
@@ -563,17 +581,6 @@ befehl_video_run() {
   local ok; read -r ok || ok=n
   case "$ok" in j|J) ;; *) info "Abgebrochen."; return 0;; esac
 
-  # Waehrend eines Laufs liegen Original und neue Fassung gleichzeitig da.
-  # Als Puffer die groesste ausgewaehlte Datei plus etwas Luft.
-  local groesste frei
-  groesste="$(awk -F'\t' '$1=="go" && $9+0 > m { m=$9 } END{ print m+0 }' "$VIDEOLISTE")"
-  frei="$(freier_platz_kb "$HOME")"
-  if [ "${frei:-0}" -lt $(( groesste + 1048576 )) ]; then
-    fehler "Zu wenig Platz: $(mb "$frei") frei, mindestens $(mb $((groesste + 1048576))) nötig."
-    info "${grau}Während des Kodierens liegen Original und neue Fassung gleichzeitig auf der Platte.${aus}"
-    return 1
-  fi
-
   local stapel; stapel="$(date '+%Y-%m-%d_%H%M%S')"
   local ziel="$QUARANTAENE/$stapel"
   local manifest="$ziel/_manifest.tsv"
@@ -581,11 +588,11 @@ befehl_video_run() {
   local tmpdir="$ARBEIT/video_arbeit"
   rm -rf "$tmpdir"; mkdir -p "$tmpdir"
 
-  local fertig=0 misslungen=0 gespart=0 i=0
+  local fertig=0 misslungen=0 gespart=0 i=0 platz_fehlt=0
   local zeile
   while IFS= read -r zeile <&3; do
     local st pfad verpackt codec w h fps dauer kb
-    felder_lesen "$zeile" st pfad verpackt codec w h fps dauer kb
+    felder_lesen "$zeile" st pfad verpackt codec w h fps dauer kb rohkb
     [ "$st" = "go" ] || continue
     i=$((i+1))
     [ -e "$pfad" ] || { warn "verschwunden: ${pfad/#$HOME/$TILDE}"; continue; }
@@ -593,9 +600,33 @@ befehl_video_run() {
 
     printf '\n%s[%d/%d]%s %s\n' "$grau" "$i" "$anzahl" "$aus" "${pfad/#$HOME/$TILDE}"
 
+    # Platz vor jeder Datei pruefen, nicht einmal vorab: Die Originale
+    # bleiben im Fegefeuer auf derselben Platte, jede neue Fassung kommt
+    # hinzu. Gebraucht wird hoechstens die Groesse des Originals -- groesser
+    # darf die neue Fassung nicht werden --, bei einem ZIP das Ausgepackte
+    # zweimal. Dazu 1 GB Luft fuer alles andere auf dem Mac. Reicht es
+    # nicht, endet der Lauf; die uebrigen bleiben freigegeben.
+    local noetig frei
+    noetig=$(( ${kb:-0} + 1048576 ))
+    [ "$verpackt" = "ja" ] && noetig=$(( ${rohkb:-0} * 2 + 1048576 ))
+    frei="$(freier_platz_kb "$HOME")"
+    if [ "${frei:-0}" -lt "$noetig" ]; then
+      warn "Zu wenig Platz: $(mb "${frei:-0}") frei, für diese Datei $(mb "$noetig") nötig."
+      info "  ${grau}Lauf beendet. Platz schafft ${aus}${fett}$0 purge${aus}${grau}, sobald du die bisherigen"
+      info "  neuen Fassungen angesehen hast; danach geht es mit ${aus}${fett}$0 video run${aus}${grau} weiter.${aus}"
+      platz_fehlt=1
+      break
+    fi
+
     # Quelle bereitstellen (ZIP wird zum Kodieren ausgepackt)
     local quelle="$pfad" ausgepackt=""
     if [ "$verpackt" = "ja" ]; then
+      # Auch hier: Die Liste kann aus einem scan stammen, der noch nicht
+      # danach fragte, und ein ZIP kann sich seither geaendert haben.
+      if ! zip_einzeldatei "$pfad"; then
+        warn "  ZIP enthält mehr als eine Datei — nicht angefasst, sonst ersetzte ein Video das ganze ZIP"
+        misslungen=$((misslungen+1)); continue
+      fi
       rm -rf "$tmpdir/aus"; mkdir -p "$tmpdir/aus"
       unzip -o -q "$pfad" -d "$tmpdir/aus" 2>/dev/null
       ausgepackt="$(find "$tmpdir/aus" -type f -size +1M 2>/dev/null | head -1)"
@@ -651,10 +682,6 @@ befehl_video_run() {
       printf '  %s✗%s Original liess sich nicht sichern\n' "$rot" "$aus"
       misslungen=$((misslungen+1)); rm -f "$neu"; rm -rf "$tmpdir/aus"; continue
     fi
-    # Nicht bloss beiseitegelegt, sondern durch eine neu kodierte Fassung
-    # ersetzt. pruefen und purge muessen das auseinanderhalten.
-    manifest_zeile "$rel" "$pfad" "$kb" "ersetzt" "video" >> "$manifest"
-
     local zielname="${pfad%.zip}"
     zielname="${zielname%.*}.mp4"
     # Aus film.mov wird film.mp4 -- das darf keine fremde Datei ueberschreiben.
@@ -665,8 +692,24 @@ befehl_video_run() {
       zielname="${zielname%.mp4} ($zaehler).mp4"
       warn "  Zielname war belegt, lege ab als $(basename "$zielname")"
     fi
-    mv "$neu" "$zielname"
+    if ! mv "$neu" "$zielname" 2>/dev/null; then
+      # Das Original zurueck an seinen Platz. Sonst laege es nur noch im
+      # Fegefeuer, waehrend das Arbeitsverzeichnis mit der neuen Fassung
+      # am Ende geloescht wird -- und purge loeschte es nach sieben Tagen.
+      printf '  %s✗%s neue Fassung liess sich nicht ablegen\n' "$rot" "$aus"
+      misslungen=$((misslungen+1)); rm -f "$neu"; rm -rf "$tmpdir/aus"
+      if ! mv "$ziel/$rel" "$pfad" 2>/dev/null; then
+        # Dann wenigstens so vermerkt, dass restore es findet
+        manifest_zeile "$rel" "$pfad" "$kb" "verschoben" "video" >> "$manifest"
+        warn "  Das Original liess sich nicht zurücklegen. Es liegt im Stapel $stapel."
+      fi
+      continue
+    fi
     rm -rf "$tmpdir/aus"
+    # Erst jetzt ins Manifest: Nicht bloss beiseitegelegt, sondern durch eine
+    # neu kodierte Fassung ersetzt. pruefen und purge muessen das
+    # auseinanderhalten.
+    manifest_zeile "$rel" "$pfad" "$kb" "ersetzt" "video" >> "$manifest"
 
     local neu_kb; neu_kb="$(du -sk "$zielname" 2>/dev/null | cut -f1)"
     gespart=$(( gespart + kb - neu_kb ))
@@ -684,6 +727,10 @@ befehl_video_run() {
 
   info "\n${gruen}$fertig neu kodiert${aus}, $(mb "$gespart") gespart"
   [ "$misslungen" -gt 0 ] && warn "$misslungen fehlgeschlagen — die Originale liegen unverändert an ihrem Platz"
+  if [ "$platz_fehlt" -eq 1 ]; then
+    local offen_go; offen_go="$(awk -F'\t' '$1=="go"' "$VIDEOLISTE" | wc -l | tr -d ' ')"
+    warn "Wegen Platzmangels vorzeitig beendet — $offen_go Videos bleiben freigegeben"
+  fi
   if [ "$fertig" -gt 0 ]; then
     info "\nDie Originale liegen im Fegefeuer: ${fett}$stapel${aus}"
     info "Erst ansehen, dann: ${fett}$0 purge${aus}   ·   zurück mit: ${fett}$0 restore $stapel${aus}"
