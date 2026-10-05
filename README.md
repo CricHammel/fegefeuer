@@ -64,7 +64,12 @@ Zeit, und unter einer gewissen Größe lohnt die Mühe selten:
 ```
 
 Ohne Angabe gilt 1 MB. Erlaubt sind `500k`, `10M`, `2G` oder eine nackte Zahl
-als Bytes.
+als Bytes; Groß- und Kleinschreibung der Einheit ist egal.
+
+Das war nicht immer so. `find` unter macOS kennt nur `k`, `M` und `G`, und
+`10m` ließ es mit einer Fehlermeldung scheitern, die nie zu sehen war — der
+Scan meldete dann schlicht „0 Dateien“. Die Einheit wird deshalb angeglichen,
+und ob `find` die Angabe versteht, wird vorab geprüft.
 
 ### Dubletten: du wählst, welche bleibt
 

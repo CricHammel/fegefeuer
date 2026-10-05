@@ -231,9 +231,23 @@ befehl_scan() {
   case "$zahl" in
     ''|*[!0-9]*) fehler "--dubletten-ab versteht z.B. 500k, 1M, 10M, 2G."; return 1;;
   esac
+  # find unter macOS kennt nur k, M und G (und c fuer Bytes). "10m" oder "2g"
+  # liess es mit einem Fehler scheitern, der in 2>/dev/null verschwand -- der
+  # Scan meldete dann einfach keine Dubletten. Darum die Schreibweise angleichen.
+  local find_groesse="$zahl"
   case "$dubletten_ab" in
-    *[0-9]) dubletten_ab="${dubletten_ab}c";;   # nackte Zahl = Bytes
+    *[kK]) find_groesse="${zahl}k";;
+    *[mM]) find_groesse="${zahl}M";;
+    *[gG]) find_groesse="${zahl}G";;
+    *)     find_groesse="${zahl}c";;   # c/C oder nackte Zahl = Bytes
   esac
+  # Und vorab an einem einzelnen Ordner pruefen, ob find die Angabe versteht.
+  # Am grossen Lauf laesst sich das nicht ablesen: der scheitert ohnehin
+  # regelmaessig an geschuetzten Ordnern und endet mit Fehlercode.
+  if ! find "$ARBEIT" -maxdepth 0 -size +"$find_groesse" >/dev/null 2>&1; then
+    fehler "find versteht die Größenangabe '$find_groesse' nicht."
+    return 1
+  fi
   : > "$KANDIDATEN.tmp"
   titel "1/5  Verwaiste App-Reste in ~/Library"
   local -a ordnerliste=("Application Support" "Caches" "Containers" "Group Containers" \
@@ -363,7 +377,7 @@ befehl_scan() {
   # OneDrive-Sync -- gleiche Inhalte sind da gewollt bzw. serverseitig.
   fortschritt_start
   fortschritt_offen "Dateien sammeln …"
-  find "$HOME" -type f -size +"$dubletten_ab" \
+  find "$HOME" -type f -size +"$find_groesse" \
     ! -path "$HOME/Library/*" ! -path "*/.Trash/*" ! -path "*/node_modules/*" \
     ! -path "*/.git/*" ! -path "*/.nvm/*" ! -path "*/.pyenv/*" ! -path "*/.m2/*" \
     ! -path "*/.cargo/*" ! -path "*/.photoslibrary/*" "${INTERN_AUSSCHLUSS[@]}" "${WOLKEN_AUSSCHLUSS[@]}" \
