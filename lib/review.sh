@@ -15,12 +15,8 @@ R_GESAMT=0
 
 r_einzeln_fragen() {   # r_einzeln_fragen <zeile>  -> Antwort in R_ANTWORT
   local zeile="$1"
-  local st kt kb mt pfad grund rest
-  st="$(printf '%s' "$zeile" | cut -f1)"
-  kb="$(printf '%s' "$zeile" | cut -f3)"
-  mt="$(printf '%s' "$zeile" | cut -f4)"
-  pfad="$(printf '%s' "$zeile" | cut -f5)"
-  grund="$(printf '%s' "$zeile" | cut -f6)"
+  local st kt kb mt pfad grund
+  felder_lesen "$zeile" st kt kb mt pfad grund
   printf '    %s%9s%s  %s\n' "$fett" "$(mb "$kb")" "$aus" "${pfad/#$HOME/$TILDE}"
   printf '    %s%s · %s%s\n' "$grau" "$grund" "$mt" "$aus"
   local antwort
@@ -40,7 +36,7 @@ r_einzeln_fragen() {   # r_einzeln_fragen <zeile>  -> Antwort in R_ANTWORT
 r_gruppe_abschliessen() {
   local anzahl=${#R_PUFFER[@]}
   [ "$anzahl" -eq 0 ] && return 0
-  local zeile st
+  local zeile st kt mt pfad
 
   # Nach einem Abbruch nur noch unveraendert durchreichen
   if [ "$R_ABBRUCH" -eq 1 ]; then
@@ -53,10 +49,9 @@ r_gruppe_abschliessen() {
   local -a offen=()
   local entschieden=0 offen_kb=0 kb
   for zeile in "${R_PUFFER[@]}"; do
-    st="$(printf '%s' "$zeile" | cut -f1)"
+    felder_lesen "$zeile" st kt kb
     if [ "$st" = "neu" ]; then
       offen+=("$zeile")
-      kb="$(printf '%s' "$zeile" | cut -f3)"
       offen_kb=$((offen_kb + kb))
     else
       entschieden=$((entschieden + 1))
@@ -70,7 +65,7 @@ r_gruppe_abschliessen() {
   # sich die Frage -- es wandert ohnehin mit.
   local alle_drin=1 pruef
   for zeile in "${offen[@]}"; do
-    pruef="$(printf '%s' "$zeile" | cut -f5)"
+    felder_lesen "$zeile" st kt kb mt pruef
     liegt_innerhalb "$pruef" "$R_GO_PFADE" || { alle_drin=0; break; }
   done
   if [ "$alle_drin" -eq 1 ]; then
@@ -82,30 +77,24 @@ r_gruppe_abschliessen() {
   fi
 
   R_NR=$((R_NR + 1))
-  local etikett grund1 pfad1 mt1
-  etikett="$(printf '%s' "${offen[0]}" | cut -f8)"
-  grund1="$(printf '%s' "${offen[0]}" | cut -f6)"
-  pfad1="$(printf '%s' "${offen[0]}" | cut -f5)"
-  mt1="$(printf '%s' "${offen[0]}" | cut -f4)"
+  local etikett grund1 pfad1 mt1 kategorie grp1
+  felder_lesen "${offen[0]}" st kategorie kb mt1 pfad1 grund1 grp1 etikett
   [ -n "$etikett" ] || etikett="$(basename "$pfad1")"
 
   # --- Dubletten: die Frage lautet nicht "weg oder nicht", sondern
   # "welche von diesen gleichen Dateien soll bleiben". Es muss immer eine
   # uebrig bleiben -- ein Griff, der alle loescht, gibt es hier nicht.
-  local kategorie
-  kategorie="$(printf '%s' "${offen[0]}" | cut -f2)"
   if [ "$kategorie" = "dublette" ] && [ "$n_offen" -ge 2 ]; then
     local -a nach_alter=()
     while IFS= read -r zeile; do nach_alter+=("$zeile"); done < <(printf '%s\n' "${offen[@]}" | sort -t$'\t' -k4,4)
-    local erstes_kb
-    erstes_kb="$(printf '%s' "${nach_alter[0]}" | cut -f3)"
+    local erstes_kb pfad_aelteste
+    felder_lesen "${nach_alter[0]}" st kt erstes_kb mt pfad_aelteste
     printf '\n%s[%d/%d]%s %s%d gleiche Dateien%s %s· je %s%s\n' \
       "$grau" "$R_NR" "$R_GESAMT" "$aus" "$fett" "$n_offen" "$aus" "$grau" "$(mb "$erstes_kb")" "$aus"
     local i=0 pfad mtime zusatz
     for zeile in "${nach_alter[@]}"; do
       i=$((i + 1))
-      pfad="$(printf '%s' "$zeile" | cut -f5)"
-      mtime="$(printf '%s' "$zeile" | cut -f4)"
+      felder_lesen "$zeile" st kt kb mtime pfad
       zusatz=""
       [ "$i" -eq 1 ] && zusatz="  ${gruen}← älteste, Vorschlag${aus}"
       printf '  %s%d%s  %-52s %s%s%s%s\n' "$fett" "$i" "$aus" \
@@ -120,7 +109,7 @@ r_gruppe_abschliessen() {
       read -r antwort || antwort=q
       case "$antwort" in
         n|N) for zeile in "${nach_alter[@]}"; do R_AUSGABE+=("$(status_setzen "$zeile" keep)"); done; return 0;;
-        o|O) open -R "$(printf '%s' "${nach_alter[0]}" | cut -f5)" 2>/dev/null;;
+        o|O) open -R "$pfad_aelteste" 2>/dev/null;;
         s|S|"") for zeile in "${nach_alter[@]}"; do R_AUSGABE+=("$zeile"); done; return 0;;
         q|Q) R_ABBRUCH=1; for zeile in "${nach_alter[@]}"; do R_AUSGABE+=("$zeile"); done; return 0;;
         *[!0-9]*|'') tasten_bitte '  ';;
@@ -134,8 +123,9 @@ r_gruppe_abschliessen() {
                 R_AUSGABE+=("$(status_setzen "$zeile" keep)")
               else
                 R_AUSGABE+=("$(status_setzen "$zeile" go)")
+                felder_lesen "$zeile" st kt kb mt pfad
                 R_GO_PFADE="$R_GO_PFADE
-$(printf '%s' "$zeile" | cut -f5)"
+$pfad"
               fi
             done
             return 0
@@ -189,9 +179,7 @@ $pfad1"; return 0;;
       printf '  %s… und %d weitere%s\n' "$grau" "$((n_offen - 6))" "$aus"
       break
     fi
-    kb="$(printf '%s' "$zeile" | cut -f3)"
-    pfad="$(printf '%s' "$zeile" | cut -f5)"
-    mtime="$(printf '%s' "$zeile" | cut -f4)"
+    felder_lesen "$zeile" st kt kb mtime pfad
     kurz="${pfad#$HOME/Library/}"
     printf '  %9s  %-56s %s%s%s\n' "$(mb "$kb")" "$kurz" "$grau" "$mtime" "$aus"
   done
@@ -206,8 +194,9 @@ $pfad1"; return 0;;
     case "$antwort" in
       j|J) for zeile in "${offen[@]}"; do
              R_AUSGABE+=("$(status_setzen "$zeile" go)")
+             felder_lesen "$zeile" st kt kb mt pfad
              R_GO_PFADE="$R_GO_PFADE
-$(printf '%s' "$zeile" | cut -f5)"
+$pfad"
            done; return 0;;
       n|N) for zeile in "${offen[@]}"; do R_AUSGABE+=("$(status_setzen "$zeile" keep)"); done; return 0;;
       o|O) open -R "$pfad1" 2>/dev/null;;
@@ -269,9 +258,9 @@ befehl_review() {
   # Schon freigegebene Ordner merken: Was darin liegt, wird mitverschoben
   # und muss nicht noch einmal gefragt werden.
   R_GO_PFADE="$(awk -F'\t' '$1=="go"{print $5}' "$KANDIDATEN")"
-  local letzte="" zeile g
+  local letzte="" zeile g st kt kb mt pfad grund
   while IFS= read -r zeile <&3; do
-    g="$(printf '%s' "$zeile" | cut -f7)"
+    felder_lesen "$zeile" st kt kb mt pfad grund g
     if [ -n "$letzte" ] && [ "$g" != "$letzte" ]; then
       r_gruppe_abschliessen
       R_PUFFER=()

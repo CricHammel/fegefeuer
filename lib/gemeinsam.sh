@@ -100,6 +100,21 @@ zeilen_schreiben() {   # zeilen_schreiben <datei> [zeile ...]
   if [ "$#" -eq 0 ]; then : > "$datei"; else printf '%s\n' "$@" > "$datei"; fi
 }
 
+# Zerlegt eine Tabellenzeile in Variablen, ohne einen Prozess zu starten.
+# Das naheliegende IFS=$'\t' read taugt dafuer nicht: Tab gilt als Leerraum,
+# aufeinanderfolgende Tabs fallen zusammen, und ein leeres Feld verschiebt
+# alle folgenden. Das Steuerzeichen 0x1F (Unit Separator) ist kein Leerraum
+# -- mit ihm als Trenner bleiben leere Felder erhalten, genau wie bei cut.
+# Was ueber die genannten Variablen hinausgeht, landet in _felder_rest und
+# nicht in der letzten Variablen.
+# shift statt "${@:2}": Bash 3.2 klebt "${@:2}" zu einem Wort zusammen, wenn
+# IFS kein Leerzeichen enthaelt -- und dieses Skript setzt IFS=$'\n\t'.
+felder_lesen() {   # felder_lesen <zeile> <var1> [var2 ...]
+  local _felder_zeile="$1" _felder_rest
+  shift
+  IFS=$'\x1f' read -r "$@" _felder_rest <<< "${_felder_zeile//$'\t'/$'\x1f'}"
+}
+
 TASTEN_ZULETZT=""
 tasten() {   # tasten <einzug> <taste:bedeutung> ...
   local einzug="$1"; shift
