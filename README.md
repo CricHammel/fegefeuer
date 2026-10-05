@@ -41,7 +41,7 @@ Beim Start prüft das Skript, ob es auf macOS läuft und ob alles Nötige da ist
 |---|---|
 | `app-rest` | Ordner in `~/Library`, zu denen keine installierte App mehr existiert |
 | `cache` | Caches, die sich selbst neu aufbauen |
-| `toolchain` | alte Node-Versionen, veraltete Playwright-Browser |
+| `toolchain` | alte Node-Versionen (außer der neuesten und der nvm-Standardversion), veraltete Playwright-Browser |
 | `gross` | Einzeldateien und Pakete (Apps, VMs, Projekte) über 200 MB |
 | `dublette` | inhaltsgleiche Dateien (SHA-1, Mindestgröße einstellbar) |
 
@@ -62,6 +62,12 @@ Punkt im Namen ist fast immer ein Dateiname, keine Bundle-ID. Sonst gälten
 `~/Library/Application Support` als Reste nicht installierter Programme.
 Ausgenommen sind `.savedState` und `.binarycookies` — die zwei Formen, die
 als Datei auftreten und sehr wohl eine Bundle-ID tragen.
+
+Bei Node bleibt neben der neuesten Version auch die, die nvm als Standard
+eingestellt hat (`~/.nvm/alias/default`) — mit ihr läuft jede neue Shell,
+auch wenn sie nicht die neueste ist. Aliase wie `20`, `node` oder `lts/*`
+werden so aufgelöst, wie nvm es tut. Passt der Standard zu keiner
+installierten Version, schlägt `scan` gar keine Node-Version vor.
 
 Die Mindestgröße für den Dublettenvergleich lässt sich setzen — hashen kostet
 Zeit, und unter einer gewissen Größe lohnt die Mühe selten:

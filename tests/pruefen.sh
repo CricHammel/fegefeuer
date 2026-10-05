@@ -369,6 +369,58 @@ test_video_scan_ohne_pakete() {
   pruefe "Video im Final-Cut-Projekt nicht" nicht grep -q 'fcpbundle' "$D/video-kandidaten.tsv"
 }
 
+# Node-Versionen unter nvm anlegen
+nvm_versionen() {   # nvm_versionen <version ...>
+  local v
+  for v in "$@"; do mkdir -p "$H/.nvm/versions/node/$v/bin"; done
+  mkdir -p "$H/.nvm/alias/lts"
+}
+
+node_kandidaten() {   # -> vorgeschlagene Node-Versionen, eine Zeile
+  awk -F'\t' '$2=="toolchain" && $5 ~ /\.nvm\/versions\/node\// { n=$5; sub(/.*\//, "", n); print n }' \
+    "$D/kandidaten.tsv" 2>/dev/null | sort | tr '\n' ' '
+}
+
+# Vorgeschlagen wurden alle Versionen ausser der neuesten -- auch die, die
+# nvm als Standard eingestellt hat und die jede neue Shell benutzt.
+test_scan_nvm_standard_bleibt() {
+  sandbox
+  nvm_versionen v18.20.0 v20.11.0 v22.1.0
+  echo 20 > "$H/.nvm/alias/default"
+  ff scan > /dev/null
+  pruefe "nur die alte, nicht die Standardversion" gleich "$(node_kandidaten)" "v18.20.0 "
+}
+
+# nvm legt "lts/*" als Kette von Aliasen an: lts/* -> lts/iron -> v20...
+test_scan_nvm_lts_alias() {
+  sandbox
+  nvm_versionen v18.20.0 v20.11.0 v22.1.0
+  echo 'lts/*' > "$H/.nvm/alias/default"
+  echo 'lts/iron' > "$H/.nvm/alias/lts/*"
+  echo 'v20.11.0' > "$H/.nvm/alias/lts/iron"
+  ff scan > /dev/null
+  pruefe "lts-Kette aufgelöst, Standard bleibt" gleich "$(node_kandidaten)" "v18.20.0 "
+}
+
+# Laesst sich der Standard nicht bestimmen, lieber kein Vorschlag als ein
+# falscher.
+test_scan_nvm_standard_unklar() {
+  sandbox
+  nvm_versionen v18.20.0 v22.1.0
+  echo v16 > "$H/.nvm/alias/default"
+  local ausgabe; ausgabe="$(ff scan)"
+  pruefe "keine Node-Version vorgeschlagen" gleich "$(node_kandidaten)" ""
+  pruefe "scan nennt den Grund" enthaelt "$ausgabe" "Standardversion"
+}
+
+# Gegenprobe: Ohne eingestellten Standard bleibt es beim bisherigen Verhalten
+test_scan_nvm_ohne_standard() {
+  sandbox
+  nvm_versionen v18.20.0 v20.11.0 v22.1.0
+  ff scan > /dev/null
+  pruefe "alle ausser der neuesten" gleich "$(node_kandidaten)" "v18.20.0 v20.11.0 "
+}
+
 # Das Muster */.photoslibrary/* traf nie: Die Mediathek heisst
 # "Photos Library.photoslibrary", vor dem Punkt steht kein Schraegstrich.
 # Mediatheken wurden komplett gehasht, und ausserhalb von ~/Pictures

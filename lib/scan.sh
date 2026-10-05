@@ -18,6 +18,29 @@ spotlight_tauglich() {
   return 1
 }
 
+# Loest einen nvm-Alias zu einer installierten Version auf, so wie nvm es
+# taete: "20" ist die neueste installierte 20.x, "node" die neueste
+# ueberhaupt, "lts/*" und andere Namen stehen als Datei unter alias/ und
+# zeigen weiter. Rueckgabe 1, wenn nichts Installiertes passt; "system"
+# heisst: keine nvm-Version, Ausgabe leer.
+nvm_aufloesen() {   # nvm_aufloesen <alias> [tiefe]
+  local a="$1" tiefe="${2:-0}" nvm="$HOME/.nvm" treffer
+  [ "$tiefe" -lt 5 ] || return 1   # gegen Kreise in den Aliasen
+  case "$a" in
+    system) return 0;;
+    node|stable) treffer="$(ls -1 "$nvm/versions/node" 2>/dev/null | sort -V | tail -1)";;
+    v[0-9]*|[0-9]*)
+      local v="${a#v}"
+      treffer="$(ls -1 "$nvm/versions/node" 2>/dev/null | grep -E "^v${v//./\\.}(\\.|$)" | sort -V | tail -1)";;
+    *)
+      [ -f "$nvm/alias/$a" ] || return 1
+      nvm_aufloesen "$(head -1 "$nvm/alias/$a")" $((tiefe + 1))
+      return $?;;
+  esac
+  [ -n "$treffer" ] || return 1
+  printf '%s\n' "$treffer"
+}
+
 # ---------- Schritt 1: App-Reste ----------
 scan_app_reste() {
   local -a ordnerliste=("Application Support" "Caches" "Containers" "Group Containers" \
@@ -133,15 +156,28 @@ befehl_scan() {
   info "  ${fett}$(( ${#caches[@]} ))${aus} Cache-Orte geprüft"
 
   titel "3/5  Alte Toolchain-Versionen"
-  # node: alle außer der neuesten
+  # node: alle ausser der neuesten und der Standardversion. Die Standard-
+  # version benutzt jede neue Shell, auch wenn sie nicht die neueste ist.
+  # Laesst sie sich nicht bestimmen, wird nichts vorgeschlagen -- lieber
+  # kein Vorschlag als die Version, mit der alles laeuft.
   if [ -d "$HOME/.nvm/versions/node" ]; then
-    local aktuell
-    aktuell="$(ls -1 "$HOME/.nvm/versions/node" 2>/dev/null | sort -V | tail -1)"
-    for v in "$HOME/.nvm/versions/node"/*; do
-      [ -d "$v" ] || continue
-      [ "$(basename "$v")" = "$aktuell" ] && continue
-      kandidat_schreiben "toolchain" "$v" "alte Node-Version (aktuell: $aktuell)"
-    done
+    local neueste standard="" standard_ok=1
+    neueste="$(ls -1 "$HOME/.nvm/versions/node" 2>/dev/null | sort -V | tail -1)"
+    if [ -f "$HOME/.nvm/alias/default" ]; then
+      local standard_alias; standard_alias="$(head -1 "$HOME/.nvm/alias/default")"
+      standard="$(nvm_aufloesen "$standard_alias")" || standard_ok=0
+    fi
+    if [ "$standard_ok" -eq 0 ]; then
+      warn "Node-Standardversion '$standard_alias' passt zu keiner installierten — keine Node-Version vorgeschlagen."
+    else
+      local behalten="neueste: $neueste"
+      [ -n "$standard" ] && [ "$standard" != "$neueste" ] && behalten="$behalten, Standard: $standard"
+      for v in "$HOME/.nvm/versions/node"/*; do
+        [ -d "$v" ] || continue
+        case "$(basename "$v")" in "$neueste"|"$standard") continue;; esac
+        kandidat_schreiben "toolchain" "$v" "alte Node-Version ($behalten)"
+      done
+    fi
   fi
   # playwright: alte Browser-Builds
   if [ -d "$HOME/Library/Caches/ms-playwright" ]; then
