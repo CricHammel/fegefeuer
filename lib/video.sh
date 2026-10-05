@@ -84,7 +84,8 @@ ffmpeg_verfolgen() {   # ffmpeg_verfolgen <pid> <meldedatei> <dauer_s> <text>
 }
 
 # Schaetzt fuer alle 'go'-Eintraege der Liste: belegt, danach, Minuten.
-# ziel_h = 0 heisst Auflösung beibehalten, sonst auf diese Höhe verkleinern.
+# ziel_h = 0 heisst Auflösung beibehalten, sonst die kurze Seite auf diesen
+# Wert verkleinern.
 # auswahl "go" (Standard) rechnet ueber die freigegebenen Dateien -- das
 # braucht video run. "lohnt" rechnet ueber alle vorgeschlagenen -- das
 # braucht der Bericht nach video scan. Beide ueber dieselbe Rechnung, damit
@@ -96,10 +97,12 @@ video_schaetzen() {   # video_schaetzen <profil> <ziel_hoehe> [go|lohnt] -> "bel
   LC_ALL=C awk -F'\t' -v bpp="$bpp" -v mpxs="$mpxs" -v zh="${2:-0}" -v auswahl="${3:-go}" '
     (auswahl == "lohnt" ? $12 == "lohnt" : $1 == "go") {
       w=$5; h=$6; fps=$7; dauer=$8; kb=$9
-      aw=w; ah=h
-      if (zh > 0 && h > zh) { ah = zh; aw = int(w * zh / h / 2) * 2 }
-      verhaeltnis = (w*h > 0) ? (aw*ah)/(w*h) : 1
-      aus_kb = bpp * aw * ah * fps * dauer / 8 / 1024
+      # Wie video run: die kurze Seite wird begrenzt. Sie bleibt dieselbe,
+      # ob die Liste die Masse gedreht fuehrt oder nicht (ffprobe meldet sie
+      # ungedreht, die Kamera vermerkt die Drehung nur).
+      kurz = (w < h) ? w : h
+      verhaeltnis = (zh > 0 && kurz > zh) ? (zh / kurz) ^ 2 : 1
+      aus_kb = bpp * w * h * verhaeltnis * fps * dauer / 8 / 1024
       if (aus_kb > kb) aus_kb = kb
       # Zeit: gemessen bei voller Auflösung; Verkleinern spart weniger als
       # das Pixelverhältnis vermuten lässt, weil das Dekodieren gleich bleibt.
@@ -639,8 +642,12 @@ befehl_video_run() {
     local start; start="$(date +%s)"
     local -a skalierung=()
     if [ "$zielhoehe" -gt 0 ]; then
-      # min() verhindert, dass kleinere Videos hochskaliert werden
-      skalierung=(-vf "scale=-2:'min($zielhoehe,ih)'")
+      # Begrenzt wird die kurze Seite: 1080p heisst 1920x1080 quer und
+      # 1080x1920 hochkant. ffmpeg hat das Bild hier schon gedreht -- frueher
+      # begrenzte min(...,ih) deshalb bei Hochkant-Videos die lange Seite,
+      # und aus 1080x1920 wurde mit 720p ein 404x720.
+      # min() verhindert, dass kleinere Videos hochskaliert werden.
+      skalierung=(-vf "scale=w='if(gte(iw,ih),-2,min($zielhoehe,iw))':h='if(gte(iw,ih),min($zielhoehe,ih),-2)'")
     fi
     # -map 0:v:0 -map 0:a? nimmt alle Tonspuren mit. Ohne -map waehlt ffmpeg
     # nur eine aus, und 16 der Testdateien hatten zwei.

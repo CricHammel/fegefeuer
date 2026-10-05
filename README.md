@@ -479,6 +479,13 @@ Das ist der größte Hebel überhaupt: 4K auf 1080p bringt **9 %** der
 Ausgangsgröße statt 20 %, bei SSIM 0,975 gegen das 4K-Original. Videos, die
 schon kleiner sind, werden nicht hochskaliert.
 
+Begrenzt wird die **kurze Seite**: 1080p heißt 1920×1080 quer und 1080×1920
+hochkant. Früher begrenzte `--auf` die Höhe, und zwar nach der Drehung, die
+ffmpeg beim Dekodieren vornimmt. Ein hochkant gefilmtes Handyvideo mit
+1080×1920 wurde so mit `--auf 720p` zu 404×720, also einem Drittel der
+gewollten Bildpunkte. Die Schätzung in der Auswahl rechnete dagegen mit den
+ungedrehten Maßen und nannte andere Zahlen, als dann herauskamen.
+
 Es ist bewusst kein Profil, sondern eine eigene Option. Ein Profil wählt, wie
 sorgfältig kodiert wird — die Auflösung zu verringern wirft dagegen
 Bildinformation weg, die nie wiederkommt. Das soll man ausdrücklich tun

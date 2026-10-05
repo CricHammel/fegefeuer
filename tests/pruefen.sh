@@ -587,6 +587,36 @@ test_video_run_platz_je_datei() {
   pruefe "run nennt den Grund" enthaelt "$ausgabe" "Zu wenig Platz"
 }
 
+# --auf begrenzte die Hoehe -- nach der Drehung, die ffmpeg beim Dekodieren
+# vornimmt, also bei Hochkant-Videos die lange Seite. Ein Handyvideo mit
+# 1080x1920 wurde mit --auf 720p zu 404x720 statt 720x1280.
+test_video_verkleinert_hochkant() {
+  sandbox
+  hat_ffmpeg || { ueberspringen "kein ffmpeg"; return 0; }
+  mkdir -p "$H/Film"
+  TESTVIDEO_GROESSE=1920x1080 testvideo "$H/Film/quer.mp4"
+  ffmpeg -v error -display_rotation 90 -i "$H/Film/quer.mp4" -c copy -y "$H/Film/hoch.mov"
+  rm "$H/Film/quer.mp4"
+  video_freigeben "$H/Film/hoch.mov"
+  echo j | ff video run --profil sparsam --auf 720p > /dev/null
+  pruefe "kodiert und geprüft" gleich "$(video_status "$H/Film/hoch.mov")" fertig
+  pruefe "kurze Seite auf 720, hochkant bleibt hochkant" \
+    gleich "$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "$H/Film/hoch.mp4" 2>/dev/null)" "720,1280"
+}
+
+# Die Schaetzung rechnete mit der Hoehe aus der Liste. Ein hochkant
+# gespeichertes Video schrumpfte dort auf ein Drittel der Bildpunkte eines
+# gleich grossen querformatigen -- die Auswahl nannte zu kleine Zahlen.
+test_video_schaetzung_hochkant() {
+  sandbox
+  local quer hoch
+  printf 'go\t%s\tnein\th264\t1920\t1080\t30\t60\t999999\t999999\t0.5\tlohnt\t0\t0\n' "$H/q.mp4" > "$D/video-kandidaten.tsv"
+  quer="$(echo n | ff video run --profil sparsam --auf 720p | grep 'etwa')"
+  printf 'go\t%s\tnein\th264\t1080\t1920\t30\t60\t999999\t999999\t0.5\tlohnt\t0\t0\n' "$H/h.mp4" > "$D/video-kandidaten.tsv"
+  hoch="$(echo n | ff video run --profil sparsam --auf 720p | grep 'etwa')"
+  pruefe "hochkant und quer werden gleich geschätzt" gleich "$hoch" "$quer"
+}
+
 # ---------- Ablauf ----------
 
 filter="${1:-}"
