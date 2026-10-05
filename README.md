@@ -490,15 +490,30 @@ Lieber einmal zu viel ablehnen: Das Original bleibt dabei unangetastet, es
 entfällt nur die Ersparnis. Mit `FEGEFEUER_SSIM_MIN` lässt sich die Grenze
 verschieben.
 
+Verglichen wird im Bild des Originals, so wie ffmpeg es zeigt. Hochkant
+gefilmte Handyvideos tragen ihre Drehung nur als Vermerk, und ffmpeg dreht
+beim Kodieren. Die Prüfung nahm früher die ungedrehten Maße aus `ffprobe`,
+skalierte damit falsch und lehnte jedes dieser Videos ab.
+
+### Was die neue Fassung mitnimmt
+
+Die Angaben der Kamera — Aufnahmeort, Aufnahmedatum, Gerät, auch Apples
+eigene Felder (`com.apple.quicktime.*`) — gehen in die neue Datei über,
+ebenso das Änderungs- und Erstellungsdatum der Datei, nach dem Finder und
+Fotos sortieren. Früher fehlte das alles: Die neue Fassung trug das heutige
+Datum und keinen Ort mehr, und nach `purge` wäre beides endgültig verloren
+gewesen.
+
 Das Original landet mit einem Vermerk im Fegefeuer, der es von verschobenen
 Dateien unterscheidet. Das ist wichtig: Am Originalort liegt danach die neue
 Fassung, und ohne diesen Vermerk würde `pruefen` melden, die Datei sei „von
 selbst zurückgekehrt" und die Quarantänekopie entbehrlich — worauf
 `purge --wieder-da` ein unersetzliches Kameraoriginal gelöscht hätte.
 
-**Dieser Unterbefehl braucht `ffmpeg`** (`brew install ffmpeg`). Er ist der
-einzige Teil, der über die Bordmittel von macOS hinausgeht, und prüft das beim
-Start.
+**Dieser Unterbefehl braucht `ffmpeg` 7.1 oder neuer** (`brew install
+ffmpeg`). Er ist der einzige Teil, der über die Bordmittel von macOS
+hinausgeht, und prüft das beim Start — die Version nicht an der Nummer,
+sondern daran, ob ffmpeg den Größenabgleich der Prüfung beherrscht.
 
 ## Dateien
 

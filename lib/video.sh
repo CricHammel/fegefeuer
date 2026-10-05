@@ -121,6 +121,16 @@ video_werkzeuge_pruefen() {
     info "  ${fett}brew install ffmpeg${aus}"
     return 1
   fi
+  # Die Pruefung skaliert mit Bezugsbild (scale=rw:rh), das gibt es erst ab
+  # ffmpeg 7.1. Ein aelteres liesse jede Pruefung scheitern -- mit einer
+  # Meldung, die nach kaputter Datei klingt. Darum vorab an zwei Farbflaechen
+  # ausprobieren statt die Versionsnummer zu deuten.
+  if ! ffmpeg -v error -f lavfi -i color=s=16x16:d=0.1 -f lavfi -i color=s=32x32:d=0.1 \
+       -lavfi "[0:v][1:v]scale=rw:rh" -f null - </dev/null >/dev/null 2>&1; then
+    fehler "Dieses ffmpeg ist zu alt für die Prüfung (nötig: 7.1 oder neuer)."
+    info "  ${fett}brew upgrade ffmpeg${aus}"
+    return 1
+  fi
   return 0
 }
 
@@ -352,15 +362,14 @@ video_pruefen() {   # video_pruefen <neu> <original> -> SSIM oder Grund, 0 = gut
   # demselben Bild -- gemessen: 0,838 statt 0,948 an derselben Stelle.
   # Der Durchlauf dekodiert beide Dateien komplett und ersetzt damit zugleich
   # die Prueflesung: bricht eine Datei ab, schlaegt er fehl.
-  # Bei verkleinerter Ausgabe muss fuer den Vergleich wieder hochskaliert
-  # werden, sonst kann der ssim-Filter die Bilder nicht uebereinanderlegen.
-  local masse_neu masse_alt lavfi="[0:v][1:v]ssim"
-  masse_neu="$(LC_ALL=C ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "$neu" 2>/dev/null)"
-  masse_alt="$(LC_ALL=C ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "$alt" 2>/dev/null)"
-  if [ -n "$masse_alt" ] && [ "$masse_neu" != "$masse_alt" ]; then
-    local aw="${masse_alt%%,*}" ah="${masse_alt##*,}"
-    lavfi="[0:v]scale=${aw}:${ah}:flags=bicubic[hoch];[hoch][1:v]ssim"
-  fi
+  # Die neue Fassung wird fuer den Vergleich auf das Bild des Originals
+  # gebracht -- bei verkleinerter Ausgabe hochskaliert, sonst kann der
+  # ssim-Filter die Bilder nicht uebereinanderlegen. Das Mass nimmt scale
+  # direkt vom Original (rw:rh), nicht von ffprobe: ffprobe meldet die
+  # ungedrehten Masse, ffmpeg dreht aber beim Dekodieren, was die Kamera als
+  # Drehung vermerkt hat. Mit den ffprobe-Massen fiel jedes hochkant gefilmte
+  # Handyvideo durch.
+  local lavfi="[1:v]split[ref1][ref2];[0:v][ref1]scale=rw:rh:flags=bicubic[neu];[neu][ref2]ssim"
   local ausgabe wert meldedatei="$ARBEIT/ssim_fortschritt.txt"
   : > "$meldedatei"
   ffmpeg -hide_banner -nostats -xerror -progress "$meldedatei" -i "$neu" -i "$alt" \
@@ -604,15 +613,20 @@ befehl_video_run() {
     fi
     # -map 0:v:0 -map 0:a? nimmt alle Tonspuren mit. Ohne -map waehlt ffmpeg
     # nur eine aus, und 16 der Testdateien hatten zwei.
+    # -map_metadata 0 mit use_metadata_tags uebernimmt die Angaben der
+    # Kamera, auch Apples eigene wie Aufnahmeort und -datum
+    # (com.apple.quicktime.*). Ohne fehlten sie der neuen Datei, und nach
+    # purge waeren sie endgueltig weg.
+    local -a metadaten=(-map_metadata 0 -movflags +faststart+use_metadata_tags)
     if ! video_ffmpeg "$dauer" "kodiere" -i "$quelle" \
          -map 0:v:0 -map "0:a?" \
-         "${skalierung[@]+"${skalierung[@]}"}" "${enc[@]}" -c:a copy -movflags +faststart "$neu"; then
+         "${skalierung[@]+"${skalierung[@]}"}" "${enc[@]}" -c:a copy "${metadaten[@]}" "$neu"; then
       # Manche Kameras legen Ton ab, den ein MP4 nicht aufnimmt (etwa PCM).
       # Dann neu kodieren statt aufzugeben.
       printf '  %sTon lässt sich nicht übernehmen, kodiere ihn neu …%s\n' "$grau" "$aus"
       if ! video_ffmpeg "$dauer" "kodiere (Ton neu)" -i "$quelle" \
            -map 0:v:0 -map "0:a?" \
-           "${skalierung[@]+"${skalierung[@]}"}" "${enc[@]}" -c:a aac -b:a 192k -movflags +faststart "$neu"; then
+           "${skalierung[@]+"${skalierung[@]}"}" "${enc[@]}" -c:a aac -b:a 192k "${metadaten[@]}" "$neu"; then
         printf '  %s✗%s Kodieren fehlgeschlagen\n' "$rot" "$aus"
         misslungen=$((misslungen+1)); rm -f "$neu"; rm -rf "$tmpdir/aus"; continue
       fi
@@ -624,6 +638,11 @@ befehl_video_run() {
       printf '  %s✗%s %s — Original bleibt unangetastet\n' "$rot" "$aus" "$grund"
       misslungen=$((misslungen+1)); rm -f "$neu"; rm -rf "$tmpdir/aus"; continue
     fi
+    # Das Datum der Datei uebernehmen: Finder und Fotos sortieren danach,
+    # und die neue Datei truege sonst das heutige. Ein aelteres
+    # Aenderungsdatum zieht unter macOS das Erstellungsdatum mit. Bei einem
+    # ZIP ist die Quelle die ausgepackte Datei -- unzip hat ihr Datum erhalten.
+    touch -r "$quelle" "$neu"
 
     # Original ins Fegefeuer, neue Datei an seinen Platz
     local rel="${pfad#$HOME/}"

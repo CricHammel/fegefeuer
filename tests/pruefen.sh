@@ -20,7 +20,7 @@ WURZEL="$(mktemp -d "${TMPDIR:-/tmp}/fegefeuer-test.XXXXXX")"
 trap 'rm -rf "$WURZEL"' EXIT
 
 T=$'\t'
-bestanden=0 gescheitert=0 aktuell=""
+bestanden=0 gescheitert=0 uebersprungen=0 aktuell=""
 
 # ---------- Werkzeuge fuer die Tests ----------
 
@@ -61,6 +61,39 @@ pruefe() {   # pruefe <beschreibung> <befehl ...>
     gescheitert=$((gescheitert + 1))
     printf '  ✗ %s: %s\n' "$aktuell" "$text"
   fi
+}
+
+ueberspringen() {   # ueberspringen <grund>
+  uebersprungen=$((uebersprungen + 1))
+  printf '  – %s: übersprungen (%s)\n' "$aktuell" "$1"
+}
+
+# Die Video-Tests brauchen ffmpeg wie video selbst. Fehlt es, werden sie
+# uebersprungen statt rot.
+hat_ffmpeg() { command -v ffmpeg >/dev/null 2>&1 && command -v ffprobe >/dev/null 2>&1; }
+
+# Ein kurzes Testvideo mit Ton. Zusaetzliche Ausgabeoptionen (Metadaten
+# etwa) gehen an ffmpeg durch. Nahezu verlustfrei kodiert, damit jede
+# Neukodierung kleiner wird. TESTVIDEO_GROESSE setzt die Aufloesung.
+testvideo() {   # testvideo <datei> [ffmpeg-ausgabeoptionen ...]
+  local ziel="$1"; shift
+  ffmpeg -v error -f lavfi -i "testsrc2=size=${TESTVIDEO_GROESSE:-640x360}:rate=30" -f lavfi -i sine=frequency=440 \
+    -t 3 -c:v libx264 -crf 10 -c:a aac -shortest "$@" -y "$ziel"
+}
+
+# Ein Video als freigegeben in die Videoliste der Sandbox eintragen, mit den
+# Spalten, die video scan schreibt.
+video_freigeben() {   # video_freigeben <pfad>
+  local p="$1" masse dauer kb
+  masse="$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "$p" | cut -d, -f1,2)"
+  dauer="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$p")"
+  kb="$(du -sk "$p" | cut -f1)"
+  printf 'go\t%s\tnein\th264\t%s\t%s\t30\t%s\t%s\t%s\t0.5\tlohnt\t0\t0\n' \
+    "$p" "${masse%,*}" "${masse#*,}" "$dauer" "$kb" "$kb" >> "$D/video-kandidaten.tsv"
+}
+
+video_status() {   # video_status <pfad> -> Status aus der Videoliste
+  awk -F'\t' -v p="$1" '$2==p { print $1; exit }' "$D/video-kandidaten.tsv"
 }
 
 nicht() { ! "$@"; }
@@ -196,6 +229,78 @@ test_apply_fotomediathek_geschuetzt() {
   pruefe "die Mediathek selbst bleibt" test -d "$m"
 }
 
+# ffmpeg dreht beim Kodieren, was die Kamera nur als Drehung vermerkt hat.
+# Die Pruefung verglich die ungedrehten Masse des Originals mit der gedrehten
+# neuen Fassung, skalierte falsch, und der SSIM-Filter brach ab -- jedes
+# hochkant gefilmte Handyvideo fiel durch.
+test_video_hochkant() {
+  sandbox
+  hat_ffmpeg || { ueberspringen "kein ffmpeg"; return 0; }
+  mkdir -p "$H/Film"
+  testvideo "$H/Film/quer.mp4"
+  ffmpeg -v error -display_rotation 90 -i "$H/Film/quer.mp4" -c copy -y "$H/Film/hoch.mov"
+  rm "$H/Film/quer.mp4"
+  video_freigeben "$H/Film/hoch.mov"
+  echo j | ff video run --profil sparsam > /dev/null
+  pruefe "hochkant kodiert und geprüft" gleich "$(video_status "$H/Film/hoch.mov")" fertig
+  pruefe "neue Fassung liegt am Platz" test -f "$H/Film/hoch.mp4"
+}
+
+# Kein Fehler, sondern Absicherung: Die Pruefung bringt eine verkleinerte
+# Fassung fuer den Vergleich auf das Mass des Originals. Das lief vorher
+# ueber eigene Masse und jetzt ueber scale=rw:rh -- es soll weiter gehen.
+test_video_verkleinert() {
+  sandbox
+  hat_ffmpeg || { ueberspringen "kein ffmpeg"; return 0; }
+  mkdir -p "$H/Film"
+  TESTVIDEO_GROESSE=1920x1080 testvideo "$H/Film/gross.mp4"
+  video_freigeben "$H/Film/gross.mp4"
+  echo j | ff video run --profil sparsam --auf 720p > /dev/null
+  pruefe "verkleinert kodiert und geprüft" gleich "$(video_status "$H/Film/gross.mp4")" fertig
+  pruefe "neue Fassung hat 720 Zeilen" \
+    gleich "$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 "$H/Film/gross.mp4" 2>/dev/null)" 720
+}
+
+# Gegenprobe zur SSIM-Messung: Mit einer unerreichbaren Schwelle muss die
+# Pruefung ablehnen. Verglich der Filter etwa das Original mit sich selbst,
+# kaeme immer 1,0 heraus, und jede Kodierung bestuende.
+test_video_pruefung_lehnt_ab() {
+  sandbox
+  hat_ffmpeg || { ueberspringen "kein ffmpeg"; return 0; }
+  mkdir -p "$H/Film"
+  testvideo "$H/Film/a.mp4"
+  video_freigeben "$H/Film/a.mp4"
+  local ausgabe
+  ausgabe="$(echo j | FEGEFEUER_SSIM_MIN=0.99999 ff video run --profil sparsam)"
+  pruefe "nennt die Bildqualität als Grund" enthaelt "$ausgabe" "Bildqualität zu weit weg"
+  pruefe "Original bleibt am Platz" test -f "$H/Film/a.mp4"
+  pruefe "bleibt freigegeben" gleich "$(video_status "$H/Film/a.mp4")" go
+  pruefe "kein Stapel angelegt" gleich "$(stapel)" ""
+}
+
+# Ohne Vorkehrung schrieb ffmpeg weder Aufnahmeort noch Aufnahmedatum der
+# Kamera in die neue Datei, und die Datei trug das heutige Datum. Nach
+# purge waeren beide endgueltig verloren.
+test_video_metadaten_bleiben() {
+  sandbox
+  hat_ffmpeg || { ueberspringen "kein ffmpeg"; return 0; }
+  mkdir -p "$H/Film"
+  local alt="$H/Film/urlaub.mov" neu="$H/Film/urlaub.mp4"
+  testvideo "$alt" -movflags use_metadata_tags \
+    -metadata "com.apple.quicktime.location.ISO6709=+50.1109+008.6821/" \
+    -metadata "com.apple.quicktime.creationdate=2019-07-14T18:03:00+0200" \
+    -metadata "creation_time=2019-07-14T16:03:00Z"
+  touch -t 201907141803 "$alt"
+  video_freigeben "$alt"
+  echo j | ff video run --profil sparsam > /dev/null
+  local tags; tags="$(ffprobe -v error -show_entries format_tags -of default=nw=1 "$neu" 2>/dev/null)"
+  pruefe "kodiert" gleich "$(video_status "$alt")" fertig
+  pruefe "Aufnahmeort bleibt" enthaelt "$tags" "location.ISO6709=+50.1109+008.6821/"
+  pruefe "Aufnahmedatum der Kamera bleibt" enthaelt "$tags" "creationdate=2019-07-14T18:03:00"
+  pruefe "Änderungsdatum der Datei bleibt" gleich "$(stat -f '%Sm' -t '%Y-%m-%d' "$neu" 2>/dev/null)" 2019-07-14
+  pruefe "Erstellungsdatum der Datei bleibt" gleich "$(stat -f '%SB' -t '%Y-%m-%d' "$neu" 2>/dev/null)" 2019-07-14
+}
+
 # ---------- Ablauf ----------
 
 filter="${1:-}"
@@ -206,9 +311,11 @@ for t in $(declare -F | awk '{ print $3 }' | grep '^test_'); do
 done
 
 echo
+zusatz=""
+[ "$uebersprungen" -gt 0 ] && zusatz=", $uebersprungen Tests übersprungen"
 if [ "$gescheitert" -eq 0 ]; then
-  echo "$bestanden Prüfungen bestanden"
+  echo "$bestanden Prüfungen bestanden$zusatz"
 else
-  echo "$bestanden bestanden, $gescheitert gescheitert"
+  echo "$bestanden bestanden, $gescheitert gescheitert$zusatz"
   exit 1
 fi
