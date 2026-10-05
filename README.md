@@ -363,8 +363,6 @@ Voraussetzungen.
 
 ## Videos neu kodieren
 
-> Auf dem Branch `video-neukodierung`.
-
 ```bash
 ./fegefeuer.sh video scan [verzeichnis]   # vermessen, nichts anfassen
 ./fegefeuer.sh video review               # auswählen
