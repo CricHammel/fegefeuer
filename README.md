@@ -507,17 +507,38 @@ Start.
 | `lib/brew.sh` | `brew` |
 | `lib/video.sh` | `video scan`, `review`, `run` |
 | `lib/gruppen.awk` | Gruppierung der Library-Reste nach Programm |
+| `tests/pruefen.sh` | Regressionstests, jeder in einer eigenen Sandbox |
 | `video-kandidaten.tsv` | vermessene Videos *(nicht im Repo)* |
 | `kandidaten.tsv` | deine Kandidaten und Entscheidungen *(nicht im Repo)* |
 | `bericht.md` | Übersicht nach jedem `scan` *(nicht im Repo)* |
+| `brew-vorschlag.sh` | Deinstallations-Vorschlag von `brew` *(nicht im Repo)* |
 | `.arbeit/` | Hashes und Zwischenstände *(nicht im Repo)* |
 
 Alles, was Pfade dieses Rechners enthält, steht in `.gitignore`. Im Repo
-liegen nur das Skript und seine Module.
+liegen nur das Skript, seine Module und die Tests.
+
+Die erzeugten Dateien liegen neben dem Skript. `FEGEFEUER_DATEN=<ordner>`
+legt sie woandershin; die Tests nutzen das, damit sie nie deine echte
+Kandidatenliste überschreiben.
 
 `fegefeuer.sh` findet die Module über sein eigenes Verzeichnis. Ein Aufruf
 über einen Symlink, etwa aus `~/bin`, funktioniert deshalb nicht; dafür einen
 Alias oder eine kleine Weiterleitung anlegen.
+
+## Tests
+
+```bash
+tests/pruefen.sh          # alle
+tests/pruefen.sh apply    # nur die, deren Name "apply" enthält
+```
+
+Jeder Test bekommt ein frisches `HOME` und einen eigenen Datenort unter
+`mktemp`, baut sich seine Dateien selbst und räumt am Ende alles weg. Dein
+Home und deine Kandidatenliste bleiben unberührt. Wie das übrige Skript
+braucht das nur die Bordmittel von macOS.
+
+Zu jedem behobenen Fehler gehört ein Test, der ihn nachstellt — geschrieben,
+bevor der Fehler behoben war, und zuerst rot.
 
 ## Was es bewusst nicht tut
 

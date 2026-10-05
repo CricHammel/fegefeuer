@@ -8,7 +8,7 @@
 # und eigener Pruefung -- und nicht als weitere Kategorie in kandidaten.tsv,
 # wo "go" bisher immer nur "verschieben" bedeutet hat.
 
-VIDEOLISTE="$BASIS/video-kandidaten.tsv"
+VIDEOLISTE="$DATEN/video-kandidaten.tsv"
 
 # Ab so viel Datenmenge je Bildpunkt lohnt das Neukodieren.
 VIDEO_SCHWELLE="0.10"

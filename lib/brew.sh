@@ -45,7 +45,7 @@ befehl_brew() {
   # Abhaengigkeiten, die schon jetzt niemand mehr braucht
   brew autoremove --dry-run 2>/dev/null | tail -12
 
-  local liste="$BASIS/brew-vorschlag.sh"
+  local liste="$DATEN/brew-vorschlag.sh"
   {
     echo "#!/usr/bin/env bash"
     echo "# Von fegefeuer.sh erzeugt am $(date '+%d.%m.%Y %H:%M')"

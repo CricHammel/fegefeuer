@@ -13,9 +13,13 @@ QUARANTAENE="$HOME/.fegefeuer"
 # Frueher hiess das Verzeichnis anders. Wer eine alte Quarantaene aus einem
 # Backup zurueckspielt, soll sie nicht verlieren.
 QUARANTAENE_ALT="$HOME/.aufraeumen-quarantaene"
-KANDIDATEN="$BASIS/kandidaten.tsv"
-BERICHT="$BASIS/bericht.md"
-ARBEIT="$BASIS/.arbeit"
+# Wo Kandidatenliste, Bericht und Arbeitsdateien liegen. Standard ist das
+# Skriptverzeichnis. Die Tests legen sie in eine Sandbox -- sonst
+# ueberschrieben sie die echte Kandidatenliste.
+DATEN="${FEGEFEUER_DATEN:-$BASIS}"
+KANDIDATEN="$DATEN/kandidaten.tsv"
+BERICHT="$DATEN/bericht.md"
+ARBEIT="$DATEN/.arbeit"
 
 mkdir -p "$ARBEIT"
 TILDE="~"
