@@ -123,6 +123,25 @@ DF
   printf '%s' "$bin"
 }
 
+# Ein mdfind, das nur die uebergebenen Bundle-IDs als installierte App kennt.
+# Ohne IDs kennt es keine -- so verhaelt sich ein abgeschalteter Index.
+# Liegt im selben bin wie falsches_df: PATH="$(falsches_mdfind ...):$PATH" ff ...
+falsches_mdfind() {   # falsches_mdfind [bundle-id ...] -> Verzeichnis mit dem mdfind
+  local bin="$WURZEL/$aktuell/bin" liste="$WURZEL/$aktuell/mdfind_ids"
+  mkdir -p "$bin"
+  printf '%s\n' "$@" > "$liste"
+  cat > "$bin/mdfind" <<MDFIND
+#!/bin/bash
+while IFS= read -r id; do
+  [ -n "\$id" ] || continue
+  case "\$*" in *"'\$id'"*) echo "/Applications/\$id.app"; exit 0;; esac
+done < "$liste"
+exit 0
+MDFIND
+  chmod +x "$bin/mdfind"
+  printf '%s' "$bin"
+}
+
 video_status() {   # video_status <pfad> -> Status aus der Videoliste
   awk -F'\t' -v p="$1" '$2==p { print $1; exit }' "$D/video-kandidaten.tsv"
 }
@@ -265,6 +284,31 @@ test_review_gruppe_und_dublette() {
   pruefe "Inhalt des freigegebenen Ordners ohne Frage go" gleich "$(status_von "$app/Cache")" go
   pruefe "von den Dubletten genau eine behalten, eine frei" \
     gleich "$(status_von "$H/a/f.bin") $(status_von "$H/b/f.bin")" "go keep"
+}
+
+# Ob eine App installiert ist, fragt scan Spotlight. Ist der Index aus oder
+# kaputt, findet Spotlight nichts -- und jeder Library-Ordner galt als Rest
+# einer deinstallierten App.
+test_scan_ohne_spotlight() {
+  sandbox
+  mkdir -p "$H/Library/Application Support/com.example.tool"
+  local bin; bin="$(falsches_mdfind)"
+  local ausgabe; ausgabe="$(PATH="$bin:$PATH" ff scan)"
+  pruefe "kein App-Rest vorgeschlagen" \
+    nicht grep -q 'com.example.tool' "$D/kandidaten.tsv"
+  pruefe "scan nennt den Grund" enthaelt "$ausgabe" "Spotlight"
+}
+
+# Gegenprobe: Mit funktionierendem Spotlight wird weiter unterschieden
+test_scan_mit_spotlight() {
+  sandbox
+  mkdir -p "$H/Library/Application Support/com.example.weg" "$H/Library/Application Support/com.example.da"
+  local bin; bin="$(falsches_mdfind com.apple.finder com.example.da)"
+  PATH="$bin:$PATH" ff scan > /dev/null
+  pruefe "Rest einer fehlenden App vorgeschlagen" \
+    gleich "$(status_von "$H/Library/Application Support/com.example.weg")" neu
+  pruefe "Ordner einer installierten App nicht" \
+    nicht grep -q 'com.example.da' "$D/kandidaten.tsv"
 }
 
 # Das Muster */.photoslibrary/* traf nie: Die Mediathek heisst

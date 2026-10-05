@@ -49,6 +49,13 @@ Ob eine App noch installiert ist, entscheidet nicht der Ordnername, sondern
 eine Spotlight-Abfrage nach der Bundle-ID (`mdfind kMDItemCFBundleIdentifier`).
 Eine frühere Namensheuristik hielt VLC und iTerm für deinstalliert.
 
+Das setzt voraus, dass Spotlight funktioniert. Ist der Index aus oder
+kaputt, verneint jede Abfrage — und jeder Ordner in `~/Library` sähe
+verwaist aus. Deshalb fragt `scan` vorher nach Apps, die jedes macOS
+mitbringt (Finder, Safari, TextEdit). Findet Spotlight keine davon, wird
+der Schritt übersprungen und `mdutil -s /` zum Nachsehen vorgeschlagen; die
+übrigen Schritte laufen weiter.
+
 Geprüft werden nur **Ordner**. App-Daten liegen in Ordnern; eine Datei mit
 Punkt im Namen ist fast immer ein Dateiname, keine Bundle-ID. Sonst gälten
 `fsck_hfs.log` in `~/Library/Logs` oder `default.store` in

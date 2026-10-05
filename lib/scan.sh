@@ -7,42 +7,19 @@ app_existiert() {
   mdfind "kMDItemCFBundleIdentifier == '$1'c" 2>/dev/null | grep -qiE '\.(app|appex)$'
 }
 
-# ---------- scan ----------
-befehl_scan() {
-  local dubletten_ab="1M"
-  while [ $# -gt 0 ]; do
-    case "$1" in
-      --dubletten-ab) shift; dubletten_ab="${1:-1M}";;
-      --dubletten-ab=*) dubletten_ab="${1#*=}";;
-      *) fehler "Unbekannte Option: $1"; return 1;;
-    esac
-    shift
+# Findet Spotlight die Apps, die jedes macOS mitbringt? Sonst ist der Index
+# aus oder kaputt, app_existiert verneint alles -- und jeder Library-Ordner
+# gaelte als Rest einer deinstallierten App.
+spotlight_tauglich() {
+  local id
+  for id in com.apple.finder com.apple.Safari com.apple.TextEdit; do
+    app_existiert "$id" && return 0
   done
-  # Einheit abtrennen und den Rest auf Ziffern pruefen. Nur das letzte
-  # Zeichen anzusehen reicht nicht -- "riesig" endet auch auf g.
-  local zahl="${dubletten_ab%[kKmMgGcC]}"
-  case "$zahl" in
-    ''|*[!0-9]*) fehler "--dubletten-ab versteht z.B. 500k, 1M, 10M, 2G."; return 1;;
-  esac
-  # find unter macOS kennt nur k, M und G (und c fuer Bytes). "10m" oder "2g"
-  # liess es mit einem Fehler scheitern, der in 2>/dev/null verschwand -- der
-  # Scan meldete dann einfach keine Dubletten. Darum die Schreibweise angleichen.
-  local find_groesse="$zahl"
-  case "$dubletten_ab" in
-    *[kK]) find_groesse="${zahl}k";;
-    *[mM]) find_groesse="${zahl}M";;
-    *[gG]) find_groesse="${zahl}G";;
-    *)     find_groesse="${zahl}c";;   # c/C oder nackte Zahl = Bytes
-  esac
-  # Und vorab an einem einzelnen Ordner pruefen, ob find die Angabe versteht.
-  # Am grossen Lauf laesst sich das nicht ablesen: der scheitert ohnehin
-  # regelmaessig an geschuetzten Ordnern und endet mit Fehlercode.
-  if ! find "$ARBEIT" -maxdepth 0 -size +"$find_groesse" >/dev/null 2>&1; then
-    fehler "find versteht die Größenangabe '$find_groesse' nicht."
-    return 1
-  fi
-  : > "$KANDIDATEN.tmp"
-  titel "1/5  Verwaiste App-Reste in ~/Library"
+  return 1
+}
+
+# ---------- Schritt 1: App-Reste ----------
+scan_app_reste() {
   local -a ordnerliste=("Application Support" "Caches" "Containers" "Group Containers" \
                         "Saved Application State" "HTTPStorages" "WebKit" "Application Scripts" "Logs")
   # Erst zaehlen, damit der Balken einen Bezugspunkt hat
@@ -91,6 +68,53 @@ befehl_scan() {
   done
   fortschritt_ende
   info "  $geprueft geprüft, ${fett}$gefunden${aus} ohne zugehörige App"
+}
+
+# ---------- scan ----------
+befehl_scan() {
+  local dubletten_ab="1M"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dubletten-ab) shift; dubletten_ab="${1:-1M}";;
+      --dubletten-ab=*) dubletten_ab="${1#*=}";;
+      *) fehler "Unbekannte Option: $1"; return 1;;
+    esac
+    shift
+  done
+  # Einheit abtrennen und den Rest auf Ziffern pruefen. Nur das letzte
+  # Zeichen anzusehen reicht nicht -- "riesig" endet auch auf g.
+  local zahl="${dubletten_ab%[kKmMgGcC]}"
+  case "$zahl" in
+    ''|*[!0-9]*) fehler "--dubletten-ab versteht z.B. 500k, 1M, 10M, 2G."; return 1;;
+  esac
+  # find unter macOS kennt nur k, M und G (und c fuer Bytes). "10m" oder "2g"
+  # liess es mit einem Fehler scheitern, der in 2>/dev/null verschwand -- der
+  # Scan meldete dann einfach keine Dubletten. Darum die Schreibweise angleichen.
+  local find_groesse="$zahl"
+  case "$dubletten_ab" in
+    *[kK]) find_groesse="${zahl}k";;
+    *[mM]) find_groesse="${zahl}M";;
+    *[gG]) find_groesse="${zahl}G";;
+    *)     find_groesse="${zahl}c";;   # c/C oder nackte Zahl = Bytes
+  esac
+  # Und vorab an einem einzelnen Ordner pruefen, ob find die Angabe versteht.
+  # Am grossen Lauf laesst sich das nicht ablesen: der scheitert ohnehin
+  # regelmaessig an geschuetzten Ordnern und endet mit Fehlercode.
+  if ! find "$ARBEIT" -maxdepth 0 -size +"$find_groesse" >/dev/null 2>&1; then
+    fehler "find versteht die Größenangabe '$find_groesse' nicht."
+    return 1
+  fi
+  : > "$KANDIDATEN.tmp"
+  titel "1/5  Verwaiste App-Reste in ~/Library"
+  if spotlight_tauglich; then
+    scan_app_reste
+  else
+    warn "Spotlight findet nicht einmal den Finder — übersprungen."
+    info "  ${grau}Ob eine App installiert ist, fragt fegefeuer Spotlight. Ist der Index aus"
+    info "  oder kaputt, sähe jeder Ordner in ~/Library verwaist aus. Prüfen mit:${aus}"
+    info "    ${fett}mdutil -s /${aus}"
+    info "  ${grau}Die übrigen Schritte brauchen Spotlight nicht.${aus}"
+  fi
 
   titel "2/5  Caches, die sich selbst neu aufbauen"
   local caches=(
