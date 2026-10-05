@@ -194,14 +194,25 @@ mitverschieben. `apply` erkennt das, überspringt den Elternordner und sagt
 dir, welcher Unterordner im Weg steht.
 
 **`pruefen` macht aus dem Warten eine Beobachtung.** Es teilt die Quarantäne
-in das, was am Originalort wieder aufgetaucht ist — das System hat den Ersatz
-also selbst geliefert, die alte Kopie ist entbehrlich — und das, was
-verschwunden geblieben ist und dir nicht gefehlt hat.
+in das, was am Originalort wieder aufgetaucht ist, und das, was verschwunden
+geblieben ist und dir nicht gefehlt hat.
+
+Was wieder aufgetaucht ist, bedeutet je nach Herkunft das Gegenteil. Ein
+**Cache** oder eine **Toolchain**, die sich neu aufgebaut hat, ist entbehrlich —
+das System hat den Ersatz selbst geliefert. Legt dagegen eine **App** ihren
+Ordner neu an, wird sie offenbar doch benutzt, und die alten Daten im
+Fegefeuer sind genau das, was ihr jetzt fehlt. `pruefen` führt diese Fälle
+deshalb getrennt als „wieder angelegt“ und schlägt `restore --ersetzen` vor.
 
 ```bash
-./fegefeuer.sh purge --wieder-da   # nur das nachweislich Entbehrliche
+./fegefeuer.sh purge --wieder-da   # nur nachgewachsene Caches und Toolchains
 ./fegefeuer.sh purge               # ganze Stapel ab 7 Tagen
 ```
+
+Dafür hält das Manifest jedes Stapels die Kategorie fest. Stapel aus älteren
+Versionen haben diese Spalte nicht. Ihre Einträge gelten als unbekannt und
+werden von `--wieder-da` nicht angefasst — die Kategorie aus dem Pfad zu
+raten ginge schief, weil App-Reste auch in `~/Library/Caches` liegen.
 
 Beide verlangen, dass du `LOESCHEN` tippst.
 

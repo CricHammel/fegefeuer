@@ -827,9 +827,7 @@ befehl_apply() {
     local zielpfad="$ziel/$rel"
     mkdir -p "$(dirname "$zielpfad")"
     if mv "$pfad" "$zielpfad" 2>/dev/null; then
-    # Vierte Spalte haelt fest, wie der Eintrag hierher kam.
-    # "verschoben": beiseitegelegt, der Originalort ist frei.
-    printf '%s\t%s\t%s\t%s\n' "$rel" "$pfad" "$kb" "verschoben" >> "$manifest"
+      manifest_zeile "$rel" "$pfad" "$kb" "verschoben" "$kt" >> "$manifest"
       verschoben=$((verschoben+1))
       printf '  %s✓%s %s\n' "$gruen" "$aus" "${pfad/#$HOME/$TILDE}"
     else
@@ -860,6 +858,22 @@ befehl_apply() {
 }
 
 # ---------- list / restore / purge ----------
+# Eine Zeile im Manifest eines Stapels:
+#   rel  original  kb  art  kategorie
+# art haelt fest, wie der Eintrag hierher kam: "verschoben" heisst
+# beiseitegelegt, der Originalort ist frei; "ersetzt" heisst, am Originalort
+# liegt jetzt eine neu kodierte Fassung.
+# kategorie ist die aus kandidaten.tsv (cache, app-rest, ...) oder "video".
+# Aeltere Stapel haben die Spalte nicht; dort ist sie leer und gilt als
+# unbekannt.
+manifest_zeile() { printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "${5:-}"; }
+
+# Bei welchen Kategorien macht ein Nachwachsen am Originalort die alte Fassung
+# entbehrlich? Nur bei Caches und Toolchains -- die baut das System selbst
+# neu auf. Legt dagegen eine App ihren Ordner neu an, wird sie offenbar doch
+# benutzt, und die alten Daten sind genau das, was ihr jetzt fehlt.
+nachwachsend() { case "${1:-}" in cache|toolchain) return 0;; esac; return 1; }
+
 befehl_list() {
   [ -d "$QUARANTAENE" ] || { info "Quarantäne ist leer."; return 0; }
   titel "Quarantäne"
@@ -900,9 +914,9 @@ befehl_restore() {
 
   local n=0 uebersprungen=0 uebersprungen_ersetzt=0 ersetzt=0 vereint=0 teils_vereint=0 misslungen=0
   local -a bleibt=()
-  local rel original kb art quelle
+  local rel original kb art kat quelle
 
-  while IFS=$'\t' read -r rel original kb art <&3; do
+  while IFS=$'\t' read -r rel original kb art kat <&3; do
     [ -n "$rel" ] || continue
     quelle="$ziel/$rel"
     if [ ! -e "$quelle" ]; then continue; fi
@@ -920,7 +934,7 @@ befehl_restore() {
               "$gelb" "$aus" "${original/#$HOME/$TILDE}" "$grau" "$aus"
           fi
           uebersprungen=$((uebersprungen + 1))
-          bleibt+=("$(printf '%s\t%s\t%s\t%s' "$rel" "$original" "$kb" "$art")")
+          bleibt+=("$(manifest_zeile "$rel" "$original" "$kb" "$art" "$kat")")
           continue;;
         zusammenfuehren)
           if [ -d "$original" ] && [ -d "$quelle" ]; then
@@ -941,7 +955,7 @@ befehl_restore() {
                 teils_vereint=$((teils_vereint + 1))
                 printf '  %s⊕%s %s %s(ergänzt · %s schon vorhanden, deren alte Fassung bleibt im Fegefeuer)%s\n' \
                   "$gruen" "$aus" "${original/#$HOME/$TILDE}" "$grau" "$nicht_ergaenzt" "$aus"
-                bleibt+=("$(printf '%s\t%s\t%s\t%s' "$rel" "$original" "$kb" "$art")")
+                bleibt+=("$(manifest_zeile "$rel" "$original" "$kb" "$art" "$kat")")
               else
                 printf '  %s⊕%s %s %s(ergänzt)%s\n' "$gruen" "$aus" "${original/#$HOME/$TILDE}" "$grau" "$aus"
               fi
@@ -951,7 +965,7 @@ befehl_restore() {
           printf '  %s•%s %s %s(keine zwei Ordner — übersprungen)%s\n' \
             "$gelb" "$aus" "${original/#$HOME/$TILDE}" "$grau" "$aus"
           uebersprungen=$((uebersprungen + 1))
-          bleibt+=("$(printf '%s\t%s\t%s\t%s' "$rel" "$original" "$kb" "$art")")
+          bleibt+=("$(manifest_zeile "$rel" "$original" "$kb" "$art" "$kat")")
           continue;;
         ersetzen)
           mkdir -p "$beiseite/$(dirname "$rel")"
@@ -961,7 +975,7 @@ befehl_restore() {
             printf '  %s✗%s %s %s(aktuelle Fassung ließ sich nicht sichern)%s\n' \
               "$rot" "$aus" "${original/#$HOME/$TILDE}" "$grau" "$aus"
             misslungen=$((misslungen + 1))
-            bleibt+=("$(printf '%s\t%s\t%s\t%s' "$rel" "$original" "$kb" "$art")")
+            bleibt+=("$(manifest_zeile "$rel" "$original" "$kb" "$art" "$kat")")
             continue
           fi;;
       esac
@@ -974,7 +988,7 @@ befehl_restore() {
     else
       printf '  %s✗%s %s\n' "$rot" "$aus" "${original/#$HOME/$TILDE}"
       misslungen=$((misslungen + 1))
-      bleibt+=("$(printf '%s\t%s\t%s\t%s' "$rel" "$original" "$kb" "$art")")
+      bleibt+=("$(manifest_zeile "$rel" "$original" "$kb" "$art" "$kat")")
     fi
   done 3< "$manifest"
 
@@ -1001,8 +1015,10 @@ befehl_restore() {
       info "${grau}Die neue Fassung wird dabei nicht gelöscht, sondern beiseitegelegt.${aus}"
     fi
     if [ "$uebersprungen" -gt "$uebersprungen_ersetzt" ]; then
-      info "${grau}Der Rest sind meist Caches, die sich selbst neu aufgebaut haben — dann brauchst"
-      info "du die alte Fassung nicht mehr: ${aus}${fett}$0 purge --wieder-da $stapel${aus}"
+      info "${grau}Bei Caches, die sich selbst neu aufgebaut haben, brauchst du die alte Fassung"
+      info "nicht mehr: ${aus}${fett}$0 purge --wieder-da $stapel${aus}"
+      info "${grau}Bei App-Resten heisst es eher: die App wird benutzt. Alte Daten zurück,"
+      info "die neue Fassung wird beiseitegelegt: ${aus}${fett}$0 restore $stapel --ersetzen${aus}"
       info "${grau}Ordner nur ergänzen: ${aus}${fett}$0 restore $stapel --zusammenfuehren${aus}"
     fi
   fi
@@ -1020,7 +1036,8 @@ befehl_restore() {
 befehl_pruefen() {
   [ -d "$QUARANTAENE" ] || { info "Quarantäne ist leer."; return 0; }
   local gesamt_wieder=0 gesamt_fehlt=0 kb_wieder=0 kb_fehlt=0 gesamt_ersetzt=0 kb_ersetzt=0
-  local stapelordner rel original kb name tage
+  local gesamt_angelegt=0 kb_angelegt=0
+  local stapelordner rel original kb kat name tage
 
   for stapelordner in "$QUARANTAENE"/*/; do
     [ -d "$stapelordner" ] || continue
@@ -1030,15 +1047,20 @@ befehl_pruefen() {
     tage=$(( ( $(date +%s) - $(stat -f %m "$stapelordner") ) / 86400 ))
 
     titel "$name  (vor $tage Tagen)"
-    local w=0 f=0 e=0 wkb=0 fkb=0 ekb=0 art
-    local -a wieder=()
-    while IFS=$'\t' read -r rel original kb art; do
+    local w=0 f=0 e=0 a=0 wkb=0 fkb=0 ekb=0 akb=0 unbekannt=0 art
+    local -a wieder=() angelegt=()
+    while IFS=$'\t' read -r rel original kb art kat; do
       [ -n "$rel" ] || continue
       if [ "$art" = "ersetzt" ]; then
         e=$((e + 1)); ekb=$((ekb + kb))
-      elif [ -e "$original" ]; then
+      elif [ -e "$original" ] && nachwachsend "$kat"; then
         w=$((w + 1)); wkb=$((wkb + kb))
         wieder+=("$(printf '%s\t%s' "$kb" "$original")")
+      elif [ -e "$original" ]; then
+        # Wieder da, aber kein Cache: eher ein Warnsignal als eine Entwarnung
+        a=$((a + 1)); akb=$((akb + kb))
+        [ -n "$kat" ] || unbekannt=$((unbekannt + 1))
+        angelegt+=("$(printf '%s\t%s\t%s' "$kb" "$original" "${kat:-?}")")
       else
         f=$((f + 1)); fkb=$((fkb + kb))
       fi
@@ -1046,6 +1068,7 @@ befehl_pruefen() {
 
     [ "$w" -gt 0 ] && info "  ${gruen}$w wieder aufgebaut${aus} ($(mb "$wkb"))   ${grau}—  von selbst zurückgekehrt, die Quarantänekopie ist überflüssig${aus}"
     [ "$f" -gt 0 ] && info "  $f noch verschwunden ($(mb "$fkb"))   ${grau}—  hat dir bisher nichts gefehlt${aus}"
+    [ "$a" -gt 0 ] && info "  ${gelb}$a wieder angelegt${aus} ($(mb "$akb"))   ${grau}—  keine Caches: wird das doch benutzt?${aus}"
     if [ "$e" -gt 0 ]; then
       info "  ${gelb}$e ersetzt${aus} ($(mb "$ekb"))   ${grau}—  Originale neu kodierter Videos${aus}"
       info "    ${grau}Am Originalort liegt die neue Fassung, nicht etwas Nachgewachsenes."
@@ -1062,13 +1085,29 @@ befehl_pruefen() {
           done
       info "\n  Platz sofort freigeben: ${fett}$0 purge --wieder-da $name${aus}"
     fi
+    if [ "$a" -gt 0 ]; then
+      info "\n  ${grau}Wieder angelegt, aber kein Cache:${aus}"
+      printf '%s\n' "${angelegt[@]}" | sort -t$'\t' -k1,1nr | head -8 \
+        | while IFS=$'\t' read -r kb original kat; do
+            printf '    %8s  %-9s %s\n' "$(mb "$kb")" "$kat" "${original/#$HOME/$TILDE}"
+          done
+      info "  ${grau}Legt eine App ihren Ordner neu an, wird sie offenbar benutzt — und ihr"
+      info "  fehlen die alten Daten, die hier liegen. Zurückholen, die neue Fassung"
+      info "  wird dabei nur beiseitegelegt (gilt für den ganzen Stapel):${aus}"
+      info "    ${fett}$0 restore $name --ersetzen${aus}"
+      [ "$unbekannt" -gt 0 ] && info "  ${grau}$unbekannt davon stammen aus einem Stapel ohne Kategorie (älter als diese Version)"
+      [ "$unbekannt" -gt 0 ] && info "  und werden deshalb vorsichtshalber genauso behandelt.${aus}"
+      info "  ${grau}purge --wieder-da lässt diese Einträge aus.${aus}"
+    fi
     gesamt_wieder=$((gesamt_wieder + w)); gesamt_fehlt=$((gesamt_fehlt + f))
     kb_wieder=$((kb_wieder + wkb)); kb_fehlt=$((kb_fehlt + fkb))
     gesamt_ersetzt=$((gesamt_ersetzt + e)); kb_ersetzt=$((kb_ersetzt + ekb))
+    gesamt_angelegt=$((gesamt_angelegt + a)); kb_angelegt=$((kb_angelegt + akb))
   done
 
   local zusatz=""
-  [ "$gesamt_ersetzt" -gt 0 ] && zusatz=", $gesamt_ersetzt ersetzt ($(mb "$kb_ersetzt"))"
+  [ "$gesamt_angelegt" -gt 0 ] && zusatz=", $gesamt_angelegt wieder angelegt ($(mb "$kb_angelegt"))"
+  [ "$gesamt_ersetzt" -gt 0 ] && zusatz="$zusatz, $gesamt_ersetzt ersetzt ($(mb "$kb_ersetzt"))"
   info "\n${fett}Zusammen:${aus} $gesamt_wieder wieder da ($(mb "$kb_wieder")), $gesamt_fehlt verschwunden ($(mb "$kb_fehlt"))$zusatz"
 }
 
@@ -1150,6 +1189,7 @@ stapel_reste_erklaeren() {
 
 # Eintraege loeschen, deren Originalpfad wieder existiert. Diese Kopien haben
 # sich als entbehrlich erwiesen -- das System hat sie selbst ersetzt.
+# Das gilt nur fuer Caches und Toolchains (siehe nachwachsend).
 purge_wieder_da() {
   local stapel="${1:-}"
   local -a stapelliste=()
@@ -1168,22 +1208,29 @@ purge_wieder_da() {
   [ ${#stapelliste[@]} -eq 0 ] && { info "Quarantäne ist leer."; return 0; }
 
   # Erst zaehlen, dann fragen
-  local gesamt=0 kb=0 uebergangen=0 sordner rel original ekb art
+  local gesamt=0 kb=0 uebergangen=0 kein_cache=0 sordner rel original ekb art kat
   for sordner in "${stapelliste[@]}"; do
     [ -f "$sordner/_manifest.tsv" ] || continue
-    while IFS=$'\t' read -r rel original ekb art; do
+    while IFS=$'\t' read -r rel original ekb art kat; do
       [ -n "$rel" ] || continue
       # Ersetzte Videooriginale sind nicht "nachgewachsen" -- am Originalort
       # liegt die neu kodierte Fassung. Die gehoeren nicht in diesen Rundumschlag.
       [ "$art" = "ersetzt" ] && { uebergangen=$((uebergangen+1)); continue; }
-      [ -e "$original" ] && [ -e "$sordner/$rel" ] && { gesamt=$((gesamt+1)); kb=$((kb+ekb)); }
+      [ -e "$original" ] && [ -e "$sordner/$rel" ] || continue
+      # Wieder angelegt, aber kein Cache: das ist kein Beleg fuer Entbehrlichkeit
+      nachwachsend "$kat" || { kein_cache=$((kein_cache+1)); continue; }
+      gesamt=$((gesamt+1)); kb=$((kb+ekb))
     done < "$sordner/_manifest.tsv"
   done
   if [ "$uebergangen" -gt 0 ]; then
     info "${grau}$uebergangen Originale neu kodierter Videos bleiben aussen vor —"
     info "dort liegt die neue Fassung, nicht etwas Nachgewachsenes.${aus}"
   fi
-  [ "$gesamt" -eq 0 ] && { info "Nichts davon ist bisher zurückgekehrt."; return 0; }
+  if [ "$kein_cache" -gt 0 ]; then
+    info "${grau}$kein_cache wieder angelegte Einträge sind keine Caches und bleiben aussen vor —"
+    info "was das bedeutet, zeigt ${aus}${fett}$0 pruefen${aus}"
+  fi
+  [ "$gesamt" -eq 0 ] && { info "Kein Cache ist bisher zurückgekehrt."; return 0; }
 
   info "${fett}$gesamt Einträge${aus} ($(mb "$kb")) sind am Originalort wieder vorhanden."
   info "${grau}Das System hat sie neu angelegt — die Quarantänekopien werden nicht mehr gebraucht.${aus}"
@@ -1196,19 +1243,19 @@ purge_wieder_da() {
   for sordner in "${stapelliste[@]}"; do
     [ -f "$sordner/_manifest.tsv" ] || continue
     local -a bleibt=()
-    while IFS=$'\t' read -r rel original ekb art; do
+    while IFS=$'\t' read -r rel original ekb art kat; do
       [ -n "$rel" ] || continue
-      if [ "$art" != "ersetzt" ] && [ -e "$original" ] && [ -e "$sordner/$rel" ]; then
+      if [ "$art" != "ersetzt" ] && nachwachsend "$kat" && [ -e "$original" ] && [ -e "$sordner/$rel" ]; then
         local vorher_kb; vorher_kb="$(du -sk "$sordner/$rel" 2>/dev/null | cut -f1)"
         rm -rf "$sordner/$rel" 2>/dev/null
         if [ -e "$sordner/$rel" ]; then
           warn "liess sich nicht löschen: ${original/#$HOME/$TILDE}"
-          bleibt+=("$(printf '%s\t%s\t%s\t%s' "$rel" "$original" "$ekb" "$art")")
+          bleibt+=("$(manifest_zeile "$rel" "$original" "$ekb" "$art" "$kat")")
           continue
         fi
         geloescht=$((geloescht+1)); wirklich_frei=$((wirklich_frei + vorher_kb))
       else
-        bleibt+=("$(printf '%s\t%s\t%s\t%s' "$rel" "$original" "$ekb" "$art")")
+        bleibt+=("$(manifest_zeile "$rel" "$original" "$ekb" "$art" "$kat")")
       fi
     done < "$sordner/_manifest.tsv"
     if [ ${#bleibt[@]} -eq 0 ]; then : > "$sordner/_manifest.tsv"; else printf '%s\n' "${bleibt[@]}" > "$sordner/_manifest.tsv"; fi
@@ -1899,9 +1946,9 @@ befehl_video_run() {
       printf '  %s✗%s Original liess sich nicht sichern\n' "$rot" "$aus"
       misslungen=$((misslungen+1)); rm -f "$neu"; rm -rf "$tmpdir/aus"; continue
     fi
-    # Vierte Spalte: nicht bloss beiseitegelegt, sondern durch eine neu
-    # kodierte Fassung ersetzt. pruefen und purge muessen das auseinanderhalten.
-    printf '%s\t%s\t%s\t%s\n' "$rel" "$pfad" "$kb" "ersetzt" >> "$manifest"
+    # Nicht bloss beiseitegelegt, sondern durch eine neu kodierte Fassung
+    # ersetzt. pruefen und purge muessen das auseinanderhalten.
+    manifest_zeile "$rel" "$pfad" "$kb" "ersetzt" "video" >> "$manifest"
 
     local zielname="${pfad%.zip}"
     zielname="${zielname%.*}.mp4"
