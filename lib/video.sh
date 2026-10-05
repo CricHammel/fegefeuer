@@ -402,21 +402,17 @@ befehl_video_review() {
   local -a ausgabe=()
   local zeile nr=0 abbruch=0 alle=0
   while IFS= read -r zeile <&3; do
-    local st pfad w h fps dauer kb neu_kb
-    st="$(printf '%s' "$zeile" | cut -f1)"
-    if [ "$st" != "neu" ] || [ "$(printf '%s' "$zeile" | cut -f12)" != "lohnt" ] || [ "$abbruch" -eq 1 ]; then
+    local st pfad verpackt codec w h fps dauer kb rohkb bpp urteil neu_schnell neu_kb
+    felder_lesen "$zeile" st pfad verpackt codec w h fps dauer kb rohkb bpp urteil neu_schnell neu_kb
+    if [ "$st" != "neu" ] || [ "$urteil" != "lohnt" ] || [ "$abbruch" -eq 1 ]; then
       ausgabe+=("$zeile"); continue
     fi
     if [ "$alle" -eq 1 ]; then ausgabe+=("$(status_setzen "$zeile" go)"); continue; fi
     nr=$((nr+1))
-    pfad="$(printf '%s' "$zeile" | cut -f2)"
-    w="$(printf '%s' "$zeile" | cut -f5)"; h="$(printf '%s' "$zeile" | cut -f6)"
-    fps="$(printf '%s' "$zeile" | cut -f7)"; dauer="$(printf '%s' "$zeile" | cut -f8)"
-    kb="$(printf '%s' "$zeile" | cut -f9)"; neu_kb="$(printf '%s' "$zeile" | cut -f14)"
     printf '\n%s[%d/%d]%s %s\n' "$grau" "$nr" "$offen" "$aus" "${pfad/#$HOME/$TILDE}"
     printf '  %s%sx%s · %s fps · %s min · %s bpp%s\n' "$grau" "$w" "$h" \
       "$(zahl "$fps" 0)" "$(zahl "$(LC_ALL=C awk -v d="$dauer" 'BEGIN{print d/60}')" 1)" \
-      "$(printf '%s' "$zeile" | cut -f11 | { read -r b; zahl "$b" 3; })" "$aus"
+      "$(zahl "$bpp" 3)" "$aus"
     printf '  %s%s%s  →  etwa %s%s%s\n' "$fett" "$(mb "$kb")" "$aus" "$fett" "$(mb "$neu_kb")" "$aus"
     local antwort
     while true; do
@@ -557,13 +553,10 @@ befehl_video_run() {
   local fertig=0 misslungen=0 gespart=0 i=0
   local zeile
   while IFS= read -r zeile <&3; do
-    local st; st="$(printf '%s' "$zeile" | cut -f1)"
+    local st pfad verpackt codec w h fps dauer kb
+    felder_lesen "$zeile" st pfad verpackt codec w h fps dauer kb
     [ "$st" = "go" ] || continue
     i=$((i+1))
-    local pfad verpackt kb
-    pfad="$(printf '%s' "$zeile" | cut -f2)"
-    verpackt="$(printf '%s' "$zeile" | cut -f3)"
-    kb="$(printf '%s' "$zeile" | cut -f9)"
     [ -e "$pfad" ] || { warn "verschwunden: ${pfad/#$HOME/$TILDE}"; continue; }
     ist_geschuetzt "$pfad" && { warn "geschützt, übersprungen: ${pfad/#$HOME/$TILDE}"; continue; }
 
@@ -589,14 +582,13 @@ befehl_video_run() {
     fi
     # -map 0:v:0 -map 0:a? nimmt alle Tonspuren mit. Ohne -map waehlt ffmpeg
     # nur eine aus, und 16 der Testdateien hatten zwei.
-    local dauer_s; dauer_s="$(printf '%s' "$zeile" | cut -f8)"
-    if ! video_ffmpeg "$dauer_s" "kodiere" -i "$quelle" \
+    if ! video_ffmpeg "$dauer" "kodiere" -i "$quelle" \
          -map 0:v:0 -map "0:a?" \
          "${skalierung[@]+"${skalierung[@]}"}" "${enc[@]}" -c:a copy -movflags +faststart "$neu"; then
       # Manche Kameras legen Ton ab, den ein MP4 nicht aufnimmt (etwa PCM).
       # Dann neu kodieren statt aufzugeben.
       printf '  %sTon lässt sich nicht übernehmen, kodiere ihn neu …%s\n' "$grau" "$aus"
-      if ! video_ffmpeg "$dauer_s" "kodiere (Ton neu)" -i "$quelle" \
+      if ! video_ffmpeg "$dauer" "kodiere (Ton neu)" -i "$quelle" \
            -map 0:v:0 -map "0:a?" \
            "${skalierung[@]+"${skalierung[@]}"}" "${enc[@]}" -c:a aac -b:a 192k -movflags +faststart "$neu"; then
         printf '  %s✗%s Kodieren fehlgeschlagen\n' "$rot" "$aus"
