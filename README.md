@@ -266,6 +266,11 @@ raten ginge schief, weil App-Reste auch in `~/Library/Caches` liegen.
 
 Beide verlangen, dass du `LOESCHEN` tippst.
 
+Liegen in den fälligen Stapeln Originale neu kodierter Videos, nennt `purge`
+sie vorher eigens. An ihrem Platz liegt nur noch die verlustbehaftete neue
+Fassung. `pruefen` und `purge --wieder-da` hielten sie schon immer heraus,
+das gewöhnliche `purge` löschte sie dagegen mit, ohne sie zu erwähnen.
+
 `purge` misst, was tatsächlich verschwunden ist, statt den Erfolg
 vorauszusetzen. Bleibt etwas liegen, sagt es das und nennt den Grund — meist
 Dateien, die ein Programm mit erhöhten Rechten angelegt hat und die nur mit

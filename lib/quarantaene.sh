@@ -491,6 +491,18 @@ befehl_purge() {
   local kb=0
   for s in "${faellig[@]}"; do kb=$(( kb + $(du -sk "$s" 2>/dev/null | cut -f1) )); done
   warn "Endgültiges Löschen von ${#faellig[@]} Stapel(n), $(mb "$kb"). Das lässt sich NICHT rückgängig machen."
+  # Originale neu kodierter Videos eigens nennen: An ihrem Platz liegt nur
+  # noch die verlustbehaftete neue Fassung. pruefen und purge --wieder-da
+  # halten sie auseinander, hier gingen sie sonst stillschweigend mit.
+  local n_videos v_kb
+  read -r n_videos v_kb <<< "$(for s in "${faellig[@]}"; do
+      [ -f "$s/_manifest.tsv" ] && cat "$s/_manifest.tsv"; done \
+    | awk -F'\t' '$4=="ersetzt" { n++; k+=$3 } END { printf "%d\t%d", n, k }')"
+  if [ "$n_videos" -gt 0 ]; then
+    if [ "$n_videos" -eq 1 ]; then info "  Darunter ${fett}das Original eines neu kodierten Videos${aus} ($(mb "$v_kb"))."
+    else info "  Darunter ${fett}$n_videos Originale neu kodierter Videos${aus} ($(mb "$v_kb"))."; fi
+    info "  ${grau}Danach gibt es von ihnen nur noch die neu kodierte Fassung. Sieh sie dir vorher an.${aus}"
+  fi
   loeschen_bestaetigen || return 0
   local befreit=0 reste=0
   for s in "${faellig[@]}"; do

@@ -696,6 +696,20 @@ MV
   pruefe "kein Stapel übrig" gleich "$(stapel)" ""
 }
 
+# purge --wieder-da laesst die Originale neu kodierter Videos aus, das
+# gewoehnliche purge loeschte sie mit, ohne sie zu erwaehnen.
+test_purge_nennt_videooriginale() {
+  sandbox
+  local s="$Q/2026-01-01_120000"
+  mkdir -p "$s/Film"
+  echo alt > "$s/Film/a.mov"
+  printf 'Film/a.mov\t%s\t5000\tersetzt\tvideo\n' "$H/Film/a.mov" > "$s/_manifest.tsv"
+  touch -t 202601011200 "$s"
+  local ausgabe; ausgabe="$(echo n | ff purge)"
+  pruefe "purge nennt die Videooriginale" enthaelt "$ausgabe" "das Original eines neu kodierten Videos"
+  pruefe "nach Nein bleibt der Stapel" test -f "$s/Film/a.mov"
+}
+
 # ---------- Ablauf ----------
 
 filter="${1:-}"
