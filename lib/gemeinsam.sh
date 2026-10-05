@@ -35,6 +35,8 @@ pruefe_umgebung() {
 # ---------- Fortschritt ----------
 # Eine Zeile, die sich selbst ueberschreibt. Nur am Terminal -- in einer
 # Pipeline oder einem Logfile waere das nur Rauschen.
+# Immer auf stderr: Funktionen wie video_pruefen werden als $(...) aufgerufen,
+# und ein Balken auf stdout landete im Rueckgabewert ("SSIM 0,000").
 FORTSCHRITT_BEGINN=0
 FORTSCHRITT_LETZTE=0
 

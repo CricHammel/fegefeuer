@@ -15,13 +15,26 @@ gefunden hatte: ein verwaister iCloud-Klon von 4,9 GB, 4,7 GB Aerial-Videos,
 drei Generationen Playwright-Browser. Deshalb zeigt das Skript Größen und
 Gründe und lässt dich entscheiden.
 
+## Was es bewusst nicht tut
+
+- Es löscht nichts ohne Wartezeit und Bestätigung.
+- Es fasst nichts außerhalb des Home-Verzeichnisses an.
+- Es entscheidet nicht, welche von zwei inhaltsgleichen Dateien die richtige
+  ist — das weißt nur du.
+- Es räumt keine Cloud-Ordner auf. Was dort verschwindet, verschwindet auf
+  dem Server, bei geteilten Ordnern für alle. Die Scans gehen gar nicht erst
+  hinein: Schon das Hashen einer nur online liegenden Datei lädt sie herunter.
+
 ## Voraussetzungen
 
 macOS und die mitgelieferte Bash 3.2 — mehr nicht. Alle benutzten Werkzeuge
 (`awk`, `mdfind`, `shasum`, `stat`, `rsync` …) gehören zum System. Homebrew
-wird nur für den Unterbefehl `brew` gebraucht und sonst nicht vermisst.
-
+braucht nur der Unterbefehl `brew`, `ffmpeg` nur der Unterbefehl `video`.
 Beim Start prüft das Skript, ob es auf macOS läuft und ob alles Nötige da ist.
+
+`fegefeuer.sh` findet seine Module über das eigene Verzeichnis. Ein Aufruf
+über einen Symlink, etwa aus `~/bin`, funktioniert deshalb nicht; dafür einen
+Alias oder eine kleine Weiterleitung anlegen.
 
 ## Ablauf
 
@@ -35,6 +48,27 @@ Beim Start prüft das Skript, ob es auf macOS läuft und ob alles Nötige da ist
 ./fegefeuer.sh purge      # endgültig löschen
 ```
 
+**Platz wird erst mit `purge` frei.** `apply` verschiebt nur, die Dateien
+liegen danach weiter auf derselben Platte. Auf einer fast vollen Platte lohnt
+es sich deshalb, mit `purge --wieder-da` früh zu löschen, was sich
+nachweislich selbst ersetzt hat (siehe [Das Sicherheitsnetz](#das-sicherheitsnetz)).
+
+| Befehl | |
+|---|---|
+| `scan [--dubletten-ab 10M]` | Platte durchsuchen, schreibt `kandidaten.tsv` und `bericht.md` |
+| `gruppen [kategorie]` | offene Gruppen, größte zuerst |
+| `review [kategorie]` | Kandidaten durchgehen und entscheiden |
+| `zeigen [kategorie]` | alle Einträge mit ihrer Entscheidung |
+| `mark <kategorie> <go\|keep\|neu> [--alle]` | eine ganze Kategorie auf einmal entscheiden |
+| `apply` | Freigegebenes ins Fegefeuer verschieben |
+| `list` | Stapel im Fegefeuer |
+| `pruefen` | was am Originalort wieder aufgetaucht ist |
+| `restore <stapel> [--zusammenfuehren\|--ersetzen]` | einen Stapel zurückholen |
+| `purge [tage]` | Stapel endgültig löschen, Standard: älter als 7 Tage |
+| `purge --wieder-da [stapel]` | nur nachgewachsene Caches und Toolchains löschen |
+| `brew` | Homebrew durchleuchten, Deinstallations-Vorschlag schreiben |
+| `video scan\|review\|run` | Videos vermessen, auswählen, neu kodieren |
+
 ### Was gesucht wird
 
 | Kategorie | Was das ist |
@@ -42,12 +76,12 @@ Beim Start prüft das Skript, ob es auf macOS läuft und ob alles Nötige da ist
 | `app-rest` | Ordner in `~/Library`, zu denen keine installierte App mehr existiert |
 | `cache` | Caches, die sich selbst neu aufbauen |
 | `toolchain` | alte Node-Versionen (außer der neuesten und der nvm-Standardversion), veraltete Playwright-Browser |
-| `gross` | Einzeldateien und Pakete (Apps, VMs, Projekte) über 200 MB |
+| `gross` | Einzeldateien und [Pakete](#pakete) über 200 MB |
 | `dublette` | inhaltsgleiche Dateien (SHA-1, Mindestgröße einstellbar) |
 
 Ob eine App noch installiert ist, entscheidet nicht der Ordnername, sondern
 eine Spotlight-Abfrage nach der Bundle-ID (`mdfind kMDItemCFBundleIdentifier`).
-Eine frühere Namensheuristik hielt VLC und iTerm für deinstalliert.
+Der Name allein täuscht: Nach ihm sähen etwa VLC und iTerm deinstalliert aus.
 
 Das setzt voraus, dass Spotlight funktioniert. Ist der Index aus oder
 kaputt, verneint jede Abfrage — und jeder Ordner in `~/Library` sähe
@@ -56,12 +90,12 @@ mitbringt (Finder, Safari, TextEdit). Findet Spotlight keine davon, wird
 der Schritt übersprungen und `mdutil -s /` zum Nachsehen vorgeschlagen; die
 übrigen Schritte laufen weiter.
 
-Geprüft werden nur **Ordner**. App-Daten liegen in Ordnern; eine Datei mit
-Punkt im Namen ist fast immer ein Dateiname, keine Bundle-ID. Sonst gälten
-`fsck_hfs.log` in `~/Library/Logs` oder `default.store` in
-`~/Library/Application Support` als Reste nicht installierter Programme.
-Ausgenommen sind `.savedState` und `.binarycookies` — die zwei Formen, die
-als Datei auftreten und sehr wohl eine Bundle-ID tragen.
+Geprüft werden nur **Ordner**, deren Name eine Bundle-ID ist. App-Daten liegen
+in Ordnern; eine Datei mit Punkt im Namen ist fast immer ein Dateiname wie
+`fsck_hfs.log`, keine Bundle-ID. Ausgenommen sind `.savedState` und
+`.binarycookies` — die zwei Formen, die als Datei auftreten und sehr wohl eine
+Bundle-ID tragen. Ordner mit schlichtem Namen (`Application Support/Slack`)
+prüft `scan` nicht.
 
 Bei Node bleibt neben der neuesten Version auch die, die nvm als Standard
 eingestellt hat (`~/.nvm/alias/default`) — mit ihr läuft jede neue Shell,
@@ -78,11 +112,6 @@ Zeit, und unter einer gewissen Größe lohnt die Mühe selten:
 
 Ohne Angabe gilt 1 MB. Erlaubt sind `500k`, `10M`, `2G` oder eine nackte Zahl
 als Bytes; Groß- und Kleinschreibung der Einheit ist egal.
-
-Das war nicht immer so. `find` unter macOS kennt nur `k`, `M` und `G`, und
-`10m` ließ es mit einer Fehlermeldung scheitern, die nie zu sehen war — der
-Scan meldete dann schlicht „0 Dateien“. Die Einheit wird deshalb angeglichen,
-und ob `find` die Angabe versteht, wird vorab geprüft.
 
 ### Dubletten: du wählst, welche bleibt
 
@@ -116,10 +145,6 @@ würde sonst auch die behaltene Kopie losschicken. Deshalb gilt:
   nicht nur je Pfad. Sonst spränge die Antwort von der einen Zeile auf die
   andere.
 
-Früher bestimmte die Sortierung, welche Datei als Original galt. Bei
-`Datei`/`Datei2` traf das zufällig zu, bei `Kopie von X` neben `X` hätte es
-genau die falsche behalten.
-
 ### Durchsicht
 
 Ein Programm verstreut seine Reste über viele Ordner — WhatsApp über 20,
@@ -137,21 +162,17 @@ Der Gruppenname nennt Hersteller **und** Produkt, weil die Bundle-ID oft nur
 den Entwickler verrät (`com.khanov.BlockerX`). Hersteller mit mehreren
 Produkten werden getrennt gehalten — `microsoft · powerpoint`,
 `microsoft · sharepoint` und `microsoft · teams` sind drei Entscheidungen,
-keine einzige.
-
-Diese Benennung gilt nur für App-Reste. Alle anderen Gruppen heißen nach
-ihrem Pfad (`~/.cache`), Dubletten nach Anzahl und Dateiname (`2× Datei.bin`).
-Früher wurde jeder Name mit Punkt in Hersteller und Produkt zerlegt — aus
-`~/.nvm/versions/node/v16.20.2` wurde „~/ · 2“, und `gruppen` warf zwei
-Node-Versionen mit diesem Namen in eine Zeile.
+keine einzige. Diese Benennung gilt nur für App-Reste. Alle anderen Gruppen
+heißen nach ihrem Pfad (`~/.cache`), Dubletten nach Anzahl und Dateiname
+(`2× Datei.bin`).
 
 Die Tastenbelegung steht bei **jeder** Frage, nicht nur einmal im Kopf — wer
 150 Dubletten durchgeht, soll nicht raten müssen.
 
 `q` unterbricht jederzeit, der Stand bleibt erhalten. Strg-C ebenso: Was bis
-dahin entschieden ist, wird gespeichert, bevor das Skript endet. Bereits entschiedene
-Einträge werden nie erneut gefragt, und eine Gruppenantwort überschreibt sie
-nicht.
+dahin entschieden ist, wird gespeichert, bevor das Skript endet. Bereits
+entschiedene Einträge werden nie erneut gefragt, und eine Gruppenantwort
+überschreibt sie nicht.
 
 ### Wenn sich Kandidaten überlappen
 
@@ -186,23 +207,6 @@ entschieden hast, bleibt, genau wie bei einer Gruppenantwort im `review`.
 `--alle` überschreibt auch das, `mark cache neu` setzt die ganze Kategorie
 zurück.
 
-## Fortschritt
-
-Die langen Schritte melden, wie weit sie sind — das Sammeln der Prüfsummen,
-das Vermessen der Videos, das Kodieren und die Prüfung danach:
-
-```
-  ██████████░░░░░░░░░░░░   46%  kodiere  noch 3:20
-```
-
-Die Anzeige geht auf **stderr**, nicht auf stdout. Das ist kein Detail: Die
-Prüfung wird als `grund="$(video_pruefen …)"` aufgerufen, und ein Balken auf
-stdout landete prompt im Rückgabewert — die Ausgabe meldete daraufhin
-„SSIM 0,000". Auf stderr bleiben Pipelines und Logdateien sauber.
-
-Ohne Terminal erscheint nichts. `FEGEFEUER_FORTSCHRITT=1` erzwingt die
-Anzeige, `=0` schaltet sie ab.
-
 ## Das Sicherheitsnetz
 
 **Nichts wird beim Aufräumen gelöscht.** `apply` verschiebt nach
@@ -222,20 +226,14 @@ solche Pfade und bietet zwei bewusste Alternativen:
                                                     # aktuelle wird beiseitegelegt
 ```
 
-Auch `--ersetzen` löscht nichts: die verdrängte Fassung landet in
-`~/.fegefeuer/_verdraengt-<datum>/`.
+Auch `--ersetzen` löscht nichts: Die verdrängte Fassung landet in
+`~/.fegefeuer/_verdraengt-<datum>/`. Und `--zusammenfuehren` holt nur zurück,
+was am Ziel fehlt. Liegt dort von einer Datei schon eine eigene Fassung,
+bleibt die alte im Stapel und im Manifest.
 
-Ebenso `--zusammenfuehren`: Es holt nur zurück, was am Ziel fehlt. Liegt dort
-von einer Datei schon eine eigene Fassung, bleibt die alte im Stapel und im
-Manifest. Früher wurde der Stapelordner nach dem Ergänzen komplett entfernt —
-mitsamt genau diesen alten Fassungen.
-
-Dasselbe gilt in der Gegenrichtung. `apply` arbeitet die Freigaben nach Pfad
-ab, damit ein Ordner vor allem wandert, was in ihm liegt, und es mitnimmt.
-Früher galt die Reihenfolge der Liste: Eine große Datei in einem
-freigegebenen Playwright-Build ging zuerst, der Build landete danach in
-`chromium-1/chromium-1`, und `restore` holte nur die Datei zurück. Ist der
-Zielpfad im Stapel trotzdem belegt, verweigert `apply` den Eintrag.
+In der Gegenrichtung gilt dasselbe. `apply` arbeitet die Freigaben nach Pfad
+ab: Ein Ordner wandert vor seinem Inhalt und nimmt ihn mit. Ist der Zielpfad
+im Stapel trotzdem belegt, verweigert `apply` den Eintrag.
 
 **Ein freigegebener Ordner nimmt nichts Behaltenes mit.** Wenn du
 `~/Library/Caches/ms-playwright` freigibst, darin aber `chromium-1234`
@@ -259,17 +257,14 @@ deshalb getrennt als „wieder angelegt“ und schlägt `restore --ersetzen` vor
 ./fegefeuer.sh purge               # ganze Stapel ab 7 Tagen
 ```
 
-Dafür hält das Manifest jedes Stapels die Kategorie fest. Stapel aus älteren
-Versionen haben diese Spalte nicht. Ihre Einträge gelten als unbekannt und
+Dafür hält das Manifest jedes Stapels die Kategorie fest. Stapel ohne diese
+Spalte stammen aus älteren Versionen; ihre Einträge gelten als unbekannt und
 werden von `--wieder-da` nicht angefasst — die Kategorie aus dem Pfad zu
 raten ginge schief, weil App-Reste auch in `~/Library/Caches` liegen.
 
-Beide verlangen, dass du `LOESCHEN` tippst.
-
-Liegen in den fälligen Stapeln Originale neu kodierter Videos, nennt `purge`
-sie vorher eigens. An ihrem Platz liegt nur noch die verlustbehaftete neue
-Fassung. `pruefen` und `purge --wieder-da` hielten sie schon immer heraus,
-das gewöhnliche `purge` löschte sie dagegen mit, ohne sie zu erwähnen.
+Beide verlangen, dass du `LOESCHEN` tippst. Liegen in den fälligen Stapeln
+Originale neu kodierter Videos, nennt `purge` sie vorher eigens: An ihrem
+Platz liegt nur noch die verlustbehaftete neue Fassung.
 
 `purge` misst, was tatsächlich verschwunden ist, statt den Erfolg
 vorauszusetzen. Bleibt etwas liegen, sagt es das und nennt den Grund — meist
@@ -277,30 +272,37 @@ Dateien, die ein Programm mit erhöhten Rechten angelegt hat und die nur mit
 `sudo` zu entfernen sind. Tauchen während des Löschens neue Dateien auf (etwa
 `.DS_Store`), räumt es sie weg und versucht es ein zweites Mal.
 
-
 ### Die Schutzliste
 
 Diese Pfade lehnt `apply` ab, selbst wenn sie als Kandidat markiert sind:
 
 - `~/Library/Keychains` — Passwörter
 - `~/Library/Mail`, `~/Library/Messages`, `~/Library/Containers/com.apple.mail*`
-- `~/Library/Mobile Documents` — iCloud Drive
-- Foto-Mediatheken (`*.photoslibrary`), wo immer sie liegen
 - `~/Library/Application Support/AddressBook` — Kontakte
 - `~/Library/Group Containers/group.com.apple.notes*` — Notizen
-- `~/Library/Group Containers/UBF8T346G9.*` und alles mit `OneDrive` im Pfad
-- Cloud-Ordner: `~/Library/CloudStorage` (Dropbox, Google Drive, Box und
-  andere File-Provider) sowie die älteren Orte `~/Dropbox`, `~/Google Drive`,
-  `~/Box`, `~/pCloud Drive`
-- `~/Library/Metadata` — Spotlight-Index
+- Foto-Mediatheken (`*.photoslibrary`), wo immer sie liegen
+- Cloud-Ordner, weil eine Löschung dort auf dem Server ankommt:
+  `~/Library/Mobile Documents` (iCloud Drive), `~/Library/CloudStorage`
+  (Dropbox, Google Drive, Box und andere File-Provider), die älteren Orte
+  `~/Dropbox`, `~/Google Drive`, `~/Box`, `~/pCloud Drive`, außerdem
+  `~/Library/Group Containers/UBF8T346G9.*` und alles mit `OneDrive` im Pfad
+- `~/Library/Metadata` — der Spotlight-Index; er führt identische Journale in
+  parallelen Pipelines und sähe voller Dubletten aus
 - `~/Library/Preferences/ByHost` — rechnergebundene Einstellungen
 - `~/.ssh`, `~/.gnupg`
 - `~/*.7z`
-- `~/.fegefeuer` und das Arbeitsverzeichnis `.arbeit` — fegefeuer findet sich
-  nicht selbst
+- `~/.fegefeuer` und das Arbeitsverzeichnis `.arbeit` — sonst fände der
+  Dublettensucher eine Datei im Fegefeuer als Kopie ihres Originals
 - alles **innerhalb** eines Pakets (siehe unten) — das Paket selbst darf
   als Ganzes wandern
 - alles außerhalb von `~`
+
+Geschützte Pfade fallen aus, *bevor* Dubletten gruppiert werden. Bleibt von
+einer Gruppe nur eine Datei übrig, ist sie keine Dublette mehr und taucht
+nicht auf. Die Dublettensuche lässt `~/Library` ganz aus.
+
+Die Liste steht in `lib/schutz.sh` (Funktion `ist_geschuetzt`) und will
+angepasst werden, wenn dein Rechner andere heikle Orte hat.
 
 ### Pakete
 
@@ -314,42 +316,21 @@ Neukodieren. Keine der Suchen geht deshalb hinein. Ist ein Paket über 200 MB,
 zeigt `scan` es als Ganzes unter `gross`; eine vergessene VM mit 60 GB soll
 schließlich auffallen.
 
-Dasselbe gilt für zwei Arten von Ordnern, die der Finder nicht als Paket
-zeigt: **Git-Repositories** (`.git` im Projekt wie ein nacktes `projekt.git`)
-und **Geräte-Backups** unter `~/Library/Application Support/MobileSync/Backup`.
-Eine einzelne Packdatei aus `.git/objects/pack` macht den Verlauf unlesbar,
-eine einzelne der Tausenden Hash-Dateien eines iPhone-Backups das ganze
-Backup unbrauchbar. Früher erschienen beide unter `gross`, sobald eine Datei
-darin über 200 MB lag. Jetzt zeigt `scan` das Repository oder das Backup als
-Ganzes. Ein altes iPhone-Backup ist oft der größte Brocken auf der Platte.
+Wie Pakete behandelt werden zwei Arten von Ordnern, die der Finder nicht als
+Paket zeigt: **Git-Repositories** (`.git` im Projekt wie ein nacktes
+`projekt.git`) und **Geräte-Backups** unter
+`~/Library/Application Support/MobileSync/Backup`. Eine einzelne Packdatei
+aus `.git/objects/pack` macht den Verlauf unlesbar, eine einzelne der
+Tausenden Hash-Dateien eines iPhone-Backups das ganze Backup unbrauchbar. Als
+Ganzes ist ein altes iPhone-Backup dagegen oft der größte Brocken auf der
+Platte.
 
 Die Listen stehen in `lib/schutz.sh` (`PAKET_ENDUNGEN`, `PAKET_ORTE`).
 Foto-Mediatheken sind auch Pakete, stehen aber ganz unter Schutz.
 
 Aus demselben Grund lässt die Dublettensuche Python-Umgebungen aus (`venv`,
-`.venv`, `site-packages`), wie schon `node_modules`. Große Dateien darin,
+`.venv`, `site-packages`), wie auch `node_modules`. Große Dateien darin,
 etwa Modelle, erscheinen weiter unter `gross`.
-
-### Woher die Einträge stammen
-
-Die zwei wichtigsten Einträge kamen aus Beinahe-Unfällen. Der Dublettensucher
-meldete 2,44 GB doppelte Dateien in einem OneDrive-Ordner — lokal gelöscht
-hätte das die Dateien serverseitig für alle Kollegen entfernt. Und
-`~/Library/Metadata` erzeugt massenhaft Schein-Dubletten, weil Spotlight
-identische Journale in parallelen Pipelines führt. Der Dublettensucher lässt
-`~/Library` inzwischen komplett aus.
-
-Dass das Fegefeuer selbst auf der Liste steht, ist kein Formalismus. Ohne den
-Eintrag fand der Dublettensucher eine Datei im Fegefeuer als Kopie ihrer
-letzten echten Fassung. Wer die aus dem Fegefeuer behielt, schickte die echte
-hinterher, und `purge` hätte nach sieben Tagen beide gelöscht.
-
-Geschützte Pfade fallen aus, *bevor* Dubletten gruppiert werden. Bleibt von
-einer Gruppe nur eine Datei übrig, ist sie keine Dublette mehr und taucht
-nicht auf.
-
-Die Liste steht in `lib/schutz.sh` (Funktion `ist_geschuetzt`) und will
-angepasst werden, wenn dein Rechner andere heikle Orte hat.
 
 ## Homebrew
 
@@ -411,18 +392,12 @@ Ein altes Datum ist ein brauchbares Signal; ab 90 Tagen wird es markiert.
 die regelmäßig laufen. Betroffen sind vor allem solche, die sich selbst
 aktualisieren; vermutlich geht er verloren, wenn sie ihr App-Bundle austauschen.
 
+Programme, deren Eintrag im Caskroom unvollständig ist, erscheinen trotzdem
+und sind markiert, weil `brew uninstall` an ihnen scheitern kann.
+
 `brew uninstall --cask` entfernt nur die App, nicht ihre Daten in
 `~/Library`. Die findet der nächste `scan` als App-Rest, und sie gehen den
 üblichen Weg durch das Fegefeuer.
-
-Welche Programme installiert sind, sagt `brew list`, nicht
-`brew info --installed`. Letzteres ließ AlDente weg: Die App läuft, aber ihr
-Eintrag im Caskroom ist unvollständig. Solche Fälle werden angezeigt und
-markiert, weil `brew uninstall` an ihnen scheitern kann.
-
-Die Cask-Daten liefert Homebrew als JSON. Gelesen wird es mit JavaScript über
-`osascript`, das jeder Mac mitbringt — `jq` oder Python wären zusätzliche
-Voraussetzungen.
 
 ## Videos neu kodieren
 
@@ -432,27 +407,16 @@ Voraussetzungen.
 ./fegefeuer.sh video run                  # kodieren, prüfen, Original sichern
 ```
 
-`video run` ohne `--profil` fragt nach und zeigt dabei die Zahlen für **deine**
-gerade ausgewählten Dateien, nicht allgemeine Richtwerte:
-
-```
-Womit kodieren?  Zahlen für deine 17 ausgewählten Dateien:
-
-  1) schnell   VideoToolbox q60       9,71 GB → 2,62 GB    7,09 GB gespart   ~17 min
-     Hardware-Chip des Macs, rund fünfmal schneller
-  2) sparsam   x265 veryfast crf24    9,71 GB → 1,90 GB    7,81 GB gespart   ~76 min
-     rechnet auf allen Kernen, Ergebnis rund ein Viertel kleiner
-```
-
-Für Skripte nimmt `--profil schnell` oder `--profil sparsam` die Frage vorweg.
-Einen stillen Standardwert gibt es bewusst nicht — wer nichts angibt und
-nichts eingeben kann, bekommt einen Fehler statt einer stillschweigend
-getroffenen Entscheidung.
-
 Videos sind ein Sonderfall und deshalb ein eigener Unterbefehl: Neukodieren
 *verschiebt* nichts, es **erzeugt eine neue, verlustbehaftete Datei**. Ein `go`
 in `kandidaten.tsv` bedeutet immer nur „verschieben"; diese Bedeutung soll es
 behalten.
+
+**Dieser Unterbefehl braucht `ffmpeg` 7.1 oder neuer** (`brew install
+ffmpeg`). Er ist der einzige Teil, der über die Bordmittel von macOS
+hinausgeht, und prüft das beim Start.
+
+### Was vorgeschlagen wird
 
 Entschieden wird über **bpp** — Datenmenge je Bildpunkt und Bild, also
 Bitrate geteilt durch Auflösung mal Bildrate. Die Kennzahl ist über
@@ -466,7 +430,34 @@ weniger als 50 MB zu erwartendem Gewinn, und Zeitraffer unter 5 fps — dort
 sagt bpp nichts Sinnvolles. Alle drei werden gezählt und benannt, nicht
 stillschweigend übergangen.
 
-Vier Profile, alle an derselben 4K60-Stelle gemessen:
+ZIPs mit genau einer Videodatei werden zum Messen und Kodieren ausgepackt.
+ZIPs mit mehr als einer Datei fasst `video` nicht an: Die neue Fassung
+ersetzte sonst das ganze ZIP, und die übrigen Dateien lägen nur noch im
+Fegefeuer. Ordner und die Beigaben des Finders (`__MACOSX`, `.DS_Store`)
+zählen nicht.
+
+### Profile
+
+`video run` ohne `--profil` fragt nach und zeigt dabei die Zahlen für **deine**
+gerade ausgewählten Dateien, nicht allgemeine Richtwerte:
+
+```
+Womit kodieren?  Zahlen für deine 17 ausgewählten Dateien:
+
+  1) schnell   VideoToolbox q60       9,71 GB → 2,62 GB    7,09 GB gespart   ~17 min
+     Hardware-Chip des Macs, mit Abstand am schnellsten
+  …
+  3) sparsam   x265 veryfast crf24    9,71 GB → 1,90 GB    7,81 GB gespart   ~76 min
+     guter Mittelweg, überall abspielbar
+  …
+```
+
+Für Skripte nimmt `--profil <name>` die Frage vorweg. Einen stillen
+Standardwert gibt es bewusst nicht — wer nichts angibt und nichts eingeben
+kann, bekommt einen Fehler statt einer stillschweigend getroffenen
+Entscheidung.
+
+Vier Profile, alle an derselben 4K60-Stelle auf einem M2 gemessen:
 
 | Profil | Encoder | Ergebnis | Zeit | SSIM |
 |---|---|---:|---:|---:|
@@ -483,32 +474,7 @@ als x265 — der M2 dekodiert AV1 allerdings **nicht** in Hardware. Abspielen
 kostet dadurch mehr Akku (2,8× statt 3,7× Echtzeit), und ältere Geräte spielen
 es womöglich gar nicht ab. Die Auswahl weist darauf hin.
 
-### Zusätzlich verkleinern
-
-```bash
-./fegefeuer.sh video run --profil sparsam --auf 1080p
-```
-
-Das ist der größte Hebel überhaupt: 4K auf 1080p bringt **9 %** der
-Ausgangsgröße statt 20 %, bei SSIM 0,975 gegen das 4K-Original. Videos, die
-schon kleiner sind, werden nicht hochskaliert.
-
-Begrenzt wird die **kurze Seite**: 1080p heißt 1920×1080 quer und 1080×1920
-hochkant. Früher begrenzte `--auf` die Höhe, und zwar nach der Drehung, die
-ffmpeg beim Dekodieren vornimmt. Ein hochkant gefilmtes Handyvideo mit
-1080×1920 wurde so mit `--auf 720p` zu 404×720, also einem Drittel der
-gewollten Bildpunkte. Die Schätzung in der Auswahl rechnete dagegen mit den
-ungedrehten Maßen und nannte andere Zahlen, als dann herauskamen.
-
-Es ist bewusst kein Profil, sondern eine eigene Option. Ein Profil wählt, wie
-sorgfältig kodiert wird — die Auflösung zu verringern wirft dagegen
-Bildinformation weg, die nie wiederkommt. Das soll man ausdrücklich tun
-müssen. Die Prüfung skaliert für den Vergleich wieder hoch, misst also, was
-tatsächlich verloren ging.
-
-### Was sich nicht lohnt
-
-Zwei naheliegende Ideen habe ich vermessen und verworfen:
+Vermessen und als Option verworfen:
 
 - **10 Bit**: 2,2-fache Rechenzeit für 0,7 % kleinere Dateien.
 - **Bildrate halbieren**: nur 13 % Gewinn. Bei halber Bildrate liegen
@@ -518,6 +484,23 @@ Zwei naheliegende Ideen habe ich vermessen und verworfen:
 - **Langsamere x265-Presets**: `medium` braucht doppelt so lange wie
   `veryfast` bei praktisch gleichem Ergebnis.
 
+### Zusätzlich verkleinern
+
+```bash
+./fegefeuer.sh video run --profil sparsam --auf 1080p
+```
+
+Das ist der größte Hebel überhaupt: 4K auf 1080p bringt **9 %** der
+Ausgangsgröße statt 20 %, bei SSIM 0,975 gegen das 4K-Original. Begrenzt wird
+die **kurze Seite**: 1080p heißt 1920×1080 quer und 1080×1920 hochkant.
+Videos, die schon kleiner sind, werden nicht hochskaliert.
+
+Es ist bewusst kein Profil, sondern eine eigene Option. Ein Profil wählt, wie
+sorgfältig kodiert wird — die Auflösung zu verringern wirft dagegen
+Bildinformation weg, die nie wiederkommt. Das soll man ausdrücklich tun
+müssen. Die Prüfung skaliert für den Vergleich wieder hoch, misst also, was
+tatsächlich verloren ging.
+
 ### Die Prüfung
 
 Kodiert wird in eine Nebendatei. Erst wenn sie **alle** Prüfungen besteht,
@@ -526,63 +509,52 @@ ein. Fällt eine durch, wird die neue Datei verworfen und das Original bleibt
 unberührt. Lässt sich die neue Fassung nicht an den Platz legen, kommt das
 Original zurück.
 
-Der freie Platz wird **vor jeder Datei** geprüft, nicht einmal vorab. Die
-Originale bleiben bis `purge` auf derselben Platte, und jede neue Fassung
-kommt hinzu — auf einer fast vollen Platte lief ein langer Lauf früher in den
-Platzmangel. Gebraucht wird die Größe des Originals plus 1 GB Luft; reicht
-das nicht, endet der Lauf, und die übrigen Videos bleiben freigegeben.
-
-ZIPs mit mehr als einer Datei fasst `video` nicht an. Aus ihnen würde nur
-die erste Datei kodiert, die neue Fassung ersetzte aber das ganze ZIP — die
-übrigen Dateien lägen danach nur noch im Fegefeuer, bis `purge` sie löscht.
-Ordner und die Beigaben des Finders (`__MACOSX`, `.DS_Store`) zählen nicht.
-
 | Prüfung | fängt ab |
 |---|---|
 | Laufzeit auf 0,5 s genau | abgeschnittene Aufnahmen |
 | Tonspur vorhanden | stumme Filme, die erst Monate später auffallen |
-| vollständige SSIM-Messung | Abbrüche, Beschädigungen, grobe Fehlkodierungen |
+| SSIM-Messung über die ganze Datei | Abbrüche, Beschädigungen, grobe Fehlkodierungen |
 | kleiner als vorher | Kodierungen, die nichts bringen |
 
-Die SSIM-Messung läuft über die **ganze** Datei, nicht über Stichproben. Ein
-erster Entwurf verglich drei Ausschnitte — an derselben Stelle ergab das
-0,838 statt 0,948, weil `-ss` vor `-i` bei unterschiedlichen Keyframe-Rastern
-nicht dasselbe Bild trifft. Gute Kodierungen wären so verworfen worden. Der
-vollständige Durchlauf dekodiert beide Dateien ohnehin und ersetzt damit
-zugleich die Prüflesung; er kostet rund die Hälfte der Kodierzeit beim
-schnellen Profil und ein Zehntel beim sparsamen.
+Die SSIM-Messung dekodiert beide Dateien vollständig und ersetzt damit
+zugleich eine Prüflesung. Verglichen wird im Bild, wie ffmpeg es zeigt, also
+bei Hochkant-Videos gedreht. Die Untergrenze liegt bei 0,90; echte
+Kodierungen lagen zwischen 0,93 bei viel Bewegung und 0,99 bei ruhigen
+Aufnahmen, eine absichtlich zerstörte Fassung bei 0,87. Lieber einmal zu viel
+ablehnen: Das Original bleibt dabei unangetastet, es entfällt nur die
+Ersparnis. Mit `FEGEFEUER_SSIM_MIN` lässt sich die Grenze verschieben.
 
-Die SSIM-Untergrenze liegt bei 0,90. Gemessene Werte echter Kodierungen lagen
-zwischen 0,93 bei viel Bewegung und 0,99 bei ruhigen Aufnahmen, eine
-absichtlich zerstörte Fassung kam auf 0,87 — der Abstand ist also knapp.
-Lieber einmal zu viel ablehnen: Das Original bleibt dabei unangetastet, es
-entfällt nur die Ersparnis. Mit `FEGEFEUER_SSIM_MIN` lässt sich die Grenze
-verschieben.
-
-Verglichen wird im Bild des Originals, so wie ffmpeg es zeigt. Hochkant
-gefilmte Handyvideos tragen ihre Drehung nur als Vermerk, und ffmpeg dreht
-beim Kodieren. Die Prüfung nahm früher die ungedrehten Maße aus `ffprobe`,
-skalierte damit falsch und lehnte jedes dieser Videos ab.
+Der freie Platz wird **vor jeder Datei** geprüft. Die Originale bleiben bis
+`purge` auf derselben Platte, und jede neue Fassung kommt hinzu. Gebraucht
+wird die Größe des Originals plus 1 GB Luft; reicht das nicht, endet der Lauf,
+und die übrigen Videos bleiben freigegeben.
 
 ### Was die neue Fassung mitnimmt
 
 Die Angaben der Kamera — Aufnahmeort, Aufnahmedatum, Gerät, auch Apples
 eigene Felder (`com.apple.quicktime.*`) — gehen in die neue Datei über,
 ebenso das Änderungs- und Erstellungsdatum der Datei, nach dem Finder und
-Fotos sortieren. Früher fehlte das alles: Die neue Fassung trug das heutige
-Datum und keinen Ort mehr, und nach `purge` wäre beides endgültig verloren
-gewesen.
+Fotos sortieren. Alle Tonspuren bleiben erhalten.
 
 Das Original landet mit einem Vermerk im Fegefeuer, der es von verschobenen
-Dateien unterscheidet. Das ist wichtig: Am Originalort liegt danach die neue
-Fassung, und ohne diesen Vermerk würde `pruefen` melden, die Datei sei „von
-selbst zurückgekehrt" und die Quarantänekopie entbehrlich — worauf
-`purge --wieder-da` ein unersetzliches Kameraoriginal gelöscht hätte.
+Dateien unterscheidet. Am Originalort liegt danach die neue Fassung — ohne den
+Vermerk hielte `pruefen` das Original für „von selbst zurückgekehrt“ und
+entbehrlich. So aber lassen `pruefen` und `purge --wieder-da` es aus.
 
-**Dieser Unterbefehl braucht `ffmpeg` 7.1 oder neuer** (`brew install
-ffmpeg`). Er ist der einzige Teil, der über die Bordmittel von macOS
-hinausgeht, und prüft das beim Start — die Version nicht an der Nummer,
-sondern daran, ob ffmpeg den Größenabgleich der Prüfung beherrscht.
+## Einstellungen
+
+| Umgebungsvariable | |
+|---|---|
+| `FEGEFEUER_DATEN=<ordner>` | wohin Kandidatenliste, Bericht und Arbeitsdateien kommen (Standard: neben dem Skript) |
+| `FEGEFEUER_FORTSCHRITT=1` bzw. `=0` | Fortschrittsbalken erzwingen bzw. abschalten (Standard: nur am Terminal) |
+| `FEGEFEUER_SSIM_MIN=0.90` | Untergrenze der Bildähnlichkeit bei `video run` |
+
+Die langen Schritte — Prüfsummen, Vermessen, Kodieren, Prüfen — zeigen einen
+Balken auf stderr, damit Pipelines und Logdateien sauber bleiben:
+
+```
+  ██████████░░░░░░░░░░░░   46%  kodiere  noch 3:20
+```
 
 ## Dateien
 
@@ -599,22 +571,15 @@ sondern daran, ob ffmpeg den Größenabgleich der Prüfung beherrscht.
 | `lib/video.sh` | `video scan`, `review`, `run` |
 | `lib/gruppen.awk` | Gruppierung der Library-Reste nach Programm |
 | `tests/pruefen.sh` | Regressionstests, jeder in einer eigenen Sandbox |
-| `video-kandidaten.tsv` | vermessene Videos *(nicht im Repo)* |
 | `kandidaten.tsv` | deine Kandidaten und Entscheidungen *(nicht im Repo)* |
+| `video-kandidaten.tsv` | vermessene Videos *(nicht im Repo)* |
 | `bericht.md` | Übersicht nach jedem `scan` *(nicht im Repo)* |
 | `brew-vorschlag.sh` | Deinstallations-Vorschlag von `brew` *(nicht im Repo)* |
 | `.arbeit/` | Hashes und Zwischenstände *(nicht im Repo)* |
 
 Alles, was Pfade dieses Rechners enthält, steht in `.gitignore`. Im Repo
-liegen nur das Skript, seine Module und die Tests.
-
-Die erzeugten Dateien liegen neben dem Skript. `FEGEFEUER_DATEN=<ordner>`
-legt sie woandershin; die Tests nutzen das, damit sie nie deine echte
-Kandidatenliste überschreiben.
-
-`fegefeuer.sh` findet die Module über sein eigenes Verzeichnis. Ein Aufruf
-über einen Symlink, etwa aus `~/bin`, funktioniert deshalb nicht; dafür einen
-Alias oder eine kleine Weiterleitung anlegen.
+liegen nur das Skript, seine Module und die Tests. Warum etwas so gebaut ist,
+steht als Kommentar an der Stelle im Code.
 
 ## Tests
 
@@ -623,20 +588,11 @@ tests/pruefen.sh          # alle
 tests/pruefen.sh apply    # nur die, deren Name "apply" enthält
 ```
 
-Jeder Test bekommt ein frisches `HOME` und einen eigenen Datenort unter
-`mktemp`, baut sich seine Dateien selbst und räumt am Ende alles weg. Dein
-Home und deine Kandidatenliste bleiben unberührt. Wie das übrige Skript
-braucht das nur die Bordmittel von macOS.
+Jeder Test bekommt ein frisches `HOME` und einen eigenen Datenort
+(`FEGEFEUER_DATEN`) unter `mktemp`, baut sich seine Dateien selbst und räumt
+am Ende alles weg. Dein Home und deine Kandidatenliste bleiben unberührt. Wie
+das übrige Skript braucht das nur die Bordmittel von macOS; die Video-Tests
+werden ohne `ffmpeg` übersprungen.
 
 Zu jedem behobenen Fehler gehört ein Test, der ihn nachstellt — geschrieben,
 bevor der Fehler behoben war, und zuerst rot.
-
-## Was es bewusst nicht tut
-
-- Es löscht nichts ohne Wartezeit und Bestätigung.
-- Es fasst nichts außerhalb des Home-Verzeichnisses an.
-- Es entscheidet nicht, welche von zwei inhaltsgleichen Dateien die richtige
-  ist — das weißt nur du.
-- Es räumt keine Cloud-Ordner auf. Was dort verschwindet, verschwindet auf
-  dem Server, bei geteilten Ordnern für alle. Die Scans gehen gar nicht erst
-  hinein: Schon das Hashen einer nur online liegenden Datei lädt sie herunter.
