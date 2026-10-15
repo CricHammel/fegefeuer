@@ -213,8 +213,21 @@ stapel_auflisten() {   # stapel_auflisten [ohne-verdraengt]
   done
 }
 
-# Alter eines Stapels in Tagen, gemessen an der Aenderungszeit des Ordners
-stapel_alter_tage() { echo $(( ( $(date +%s) - $(stat -f %m "$1") ) / 86400 )); }
+# Alter eines Stapels in Tagen. Gemessen am Zeitstempel im Namen, den apply,
+# video run und restore --ersetzen vergeben. Die Aenderungszeit des Ordners
+# taugt nicht: Schon der Finder setzt sie neu, wenn er eine .DS_Store anlegt,
+# und ein geoeffneter Stapel galt fuer purge dann wieder als frisch. Nur bei
+# Namen ohne Zeitstempel bleibt sie der Notbehelf.
+stapel_alter_tage() {   # stapel_alter_tage <stapelordner>
+  local name sek
+  name="$(basename "$1")"; name="${name#_verdraengt-}"
+  case "$name" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]_[0-9][0-9][0-9][0-9][0-9][0-9])
+      sek="$(date -j -f '%Y-%m-%d_%H%M%S' "$name" +%s 2>/dev/null)";;
+  esac
+  [ -n "$sek" ] || sek="$(stat -f %m "$1")"
+  echo $(( ( $(date +%s) - sek ) / 86400 ))
+}
 
 # Statt "vor 0 Tagen" und "vor 1 Tagen". Gezaehlt wird in vollen 24 Stunden,
 # nicht nach Kalendertagen -- "heute" oder "gestern" waeren deshalb falsch.

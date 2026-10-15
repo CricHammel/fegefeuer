@@ -774,6 +774,22 @@ FFMPEG
   pruefe "Original am Platz" test -f "$H/Film/a.mp4"
 }
 
+# Das Alter eines Stapels kam aus dem Aenderungsdatum seines Ordners. Das
+# setzt schon der Finder neu, wenn er dort eine .DS_Store anlegt -- ein
+# geoeffneter Stapel galt fuer purge dann wieder als frisch. Das Datum steht
+# im Namen.
+test_purge_alter_aus_name() {
+  sandbox
+  local s="$Q/2026-01-01_120000"
+  mkdir -p "$s/Library/Caches"
+  echo x > "$s/Library/Caches/foo"
+  printf 'Library/Caches/foo\t%s\t4\tverschoben\tcache\n' "$H/Library/Caches/foo" > "$s/_manifest.tsv"
+  touch "$s/.DS_Store"
+  local ausgabe; ausgabe="$(echo n | ff purge)"
+  pruefe "alter Stapel ist fällig" enthaelt "$ausgabe" "1 Stapel"
+  pruefe "nach Nein bleibt er" test -f "$s/Library/Caches/foo"
+}
+
 # purge --wieder-da laesst die Originale neu kodierter Videos aus, das
 # gewoehnliche purge loeschte sie mit, ohne sie zu erwaehnen.
 test_purge_nennt_videooriginale() {

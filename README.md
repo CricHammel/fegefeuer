@@ -262,6 +262,9 @@ Spalte stammen aus älteren Versionen; `pruefen` führt ihre Einträge eigens al
 „Kategorie unbekannt“, und `--wieder-da` lässt sie aus — die Kategorie aus dem
 Pfad zu raten ginge schief, weil App-Reste auch in `~/Library/Caches` liegen.
 
+Wie alt ein Stapel ist, ergibt sich aus dem Zeitstempel in seinem Namen. Ihn
+im Finder zu öffnen ändert daran nichts.
+
 Beide verlangen, dass du `LOESCHEN` tippst. Liegen in den fälligen Stapeln
 Originale neu kodierter Videos, nennt `purge` sie vorher eigens: An ihrem
 Platz liegt nur noch die verlustbehaftete neue Fassung.
