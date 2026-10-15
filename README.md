@@ -168,6 +168,13 @@ keine einzige. Diese Benennung gilt nur für App-Reste. Alle anderen Gruppen
 heißen nach ihrem Pfad (`~/.cache`), Dubletten nach Anzahl und Dateiname
 (`2× Datei.bin`).
 
+Die Fragen kommen ordnerweise: Gruppen aus demselben Ordner stehen
+hintereinander, bei Dubletten aus demselben Ordnerpaar. So triffst du ähnliche
+Entscheidungen am Stück, statt zwischen „Kopie weg“ in einem Ordner und
+„beide behalten“ im nächsten hin- und herzudenken. Die Blöcke kommen nach
+ihrer Größe, das Lohnendste zuerst. Hat ein Block mehrere Gruppen, kündigt
+eine Zeile ihn an.
+
 Die Tastenbelegung steht bei **jeder** Frage, nicht nur einmal im Kopf — wer
 150 Dubletten durchgeht, soll nicht raten müssen.
 

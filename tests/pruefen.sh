@@ -829,6 +829,42 @@ SHASUM
   pruefe "Dublette weiter gefunden" gleich "$(status_von "$H/d/x.bin") $(status_von "$H/d/y.bin")" "neu neu"
 }
 
+# review sortierte nur nach Gruppengroesse. Gruppen aus demselben Ordner
+# lagen dadurch verstreut, und bei jeder Frage musste man neu umdenken --
+# etwa zwischen "Kopie weg" in einem Ordnerpaar und "beide behalten" im
+# anderen. Jetzt kommen sie ordnerweise, der groesste Block zuerst.
+test_review_nach_ordnern() {
+  sandbox
+  mkdir -p "$H/a" "$H/b" "$H/c" "$H/d"
+  local x
+  for x in eins zwei; do echo "$x" > "$H/a/$x.bin"; echo "$x" > "$H/b/$x.bin"; done
+  echo drei > "$H/c/drei.bin"; echo drei > "$H/d/drei.bin"
+  kandidat neu dublette 300 "$H/a/eins.bin" dub-1
+  kandidat neu dublette 300 "$H/b/eins.bin" dub-1
+  kandidat neu dublette 200 "$H/c/drei.bin" dub-3
+  kandidat neu dublette 200 "$H/d/drei.bin" dub-3
+  kandidat neu dublette 100 "$H/a/zwei.bin" dub-2
+  kandidat neu dublette 100 "$H/b/zwei.bin" dub-2
+  local ausgabe reihe
+  ausgabe="$(printf 's\ns\ns\n' | ff review)"
+  reihe="$(printf '%s\n' "$ausgabe" | grep -oE '(eins|zwei|drei)\.bin' | uniq | tr '\n' ' ')"
+  pruefe "Gruppen eines Ordnerpaars hintereinander" gleich "$reihe" "eins.bin zwei.bin drei.bin "
+  pruefe "Block wird angekündigt" enthaelt "$ausgabe" "── ~/a ⇄ ~/b · 2 Gruppen"
+  pruefe "einzelne Gruppe ohne Ankündigung" nicht enthaelt "$ausgabe" "── ~/c"
+}
+
+# Dasselbe fuer grosse Dateien: gleicher Ordner, gleicher Block
+test_review_gross_nach_ordnern() {
+  sandbox
+  mkdir -p "$H/Filme" "$H/Sonst"
+  kandidat neu gross 900 "$H/Filme/a.mp4"
+  kandidat neu gross 800 "$H/Sonst/b.bin"
+  kandidat neu gross 700 "$H/Filme/c.mp4"
+  local reihe
+  reihe="$(printf 's\ns\ns\n' | ff review | grep -oE '(a\.mp4|b\.bin|c\.mp4)' | uniq | tr '\n' ' ')"
+  pruefe "Dateien eines Ordners hintereinander" gleich "$reihe" "a.mp4 c.mp4 b.bin "
+}
+
 # purge --wieder-da laesst die Originale neu kodierter Videos aus, das
 # gewoehnliche purge loeschte sie mit, ohne sie zu erwaehnen.
 test_purge_nennt_videooriginale() {

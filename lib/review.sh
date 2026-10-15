@@ -3,10 +3,58 @@
 # Wird von fegefeuer.sh geladen, nicht direkt aufgerufen.
 
 # ---------- review ----------
+# Reihenfolge der Durchsicht. Gruppen aus demselben Ordner kommen
+# hintereinander -- verstreut musste man bei jeder Frage neu umdenken, etwa
+# zwischen "Kopie weg" in einem Ordnerpaar und "beide behalten" im naechsten.
+# Ein Block ist der Ordner eines Eintrags, bei Dubletten das Ordnerpaar
+# "A ⇄ B", bei App-Resten die Gruppe des Herstellers. Die Bloecke kommen nach
+# ihrer Groesse, darin die Gruppen nach ihrer -- das Lohnende zuerst. Es
+# zaehlen nur offene Eintraege.
+# Ausgabe je Zeile: Block, Zahl seiner offenen Gruppen, Kandidatenzeile.
+review_sortieren() {   # review_sortieren <kandidatendatei>
+  LC_ALL=C awk -F'\t' -v OFS='\t' -v h="$HOME" '
+    function ordner(p) {
+      sub(/\/[^\/]*$/, "", p)
+      if (index(p, h "/") == 1) p = "~" substr(p, length(h) + 1)
+      return p
+    }
+    function block_von(g,   n, t, a, c, x, b) {
+      if (kat[g] == "app-rest") return "app-rest " g
+      if (kat[g] != "dublette") return ordner(erster[g])
+      n = split(orte[g], t, "\n")
+      for (a = 1; a <= n; a++) for (c = a + 1; c <= n; c++) if (t[c] < t[a]) { x = t[a]; t[a] = t[c]; t[c] = x }
+      b = t[1]
+      for (a = 2; a <= n; a++) b = b " ⇄ " t[a]
+      return b
+    }
+    NR == FNR {
+      if (!($7 in kat)) { kat[$7] = $2; erster[$7] = $5 }
+      if ($1 == "neu") { summe[$7] += $3; offen[$7] = 1 }
+      if ($2 == "dublette") {
+        o = ordner($5)
+        if (index("\n" orte[$7] "\n", "\n" o "\n") == 0) orte[$7] = (orte[$7] == "" ? o : orte[$7] "\n" o)
+      }
+      next
+    }
+    FNR == 1 {
+      for (g in kat) {
+        block[g] = block_von(g)
+        bsumme[block[g]] += summe[g]
+        if (g in offen) banzahl[block[g]]++
+      }
+    }
+    { b = block[$7]; print bsumme[b] + 0, b, summe[$7] + 0, banzahl[b] + 0, $0 }' "$1" "$1" \
+  | LC_ALL=C sort -t$'\t' -k1,1nr -k2,2 -k3,3nr -k11,11 -k7,7nr \
+  | cut -f2,4-
+}
+
 # Eintraege desselben Programms liegen ueber viele Library-Ordner verstreut.
 # Sie werden zu einer Gruppe zusammengefasst und gemeinsam entschieden.
 R_PUFFER=()
 R_AUSGABE=()
+R_BLOCK=""            # Block der Gruppe in R_PUFFER (siehe review_sortieren)
+R_BLOCK_N=0           # wie viele offene Gruppen dieser Block hat
+R_BLOCK_GEZEIGT=""    # zuletzt angekuendigter Block
 R_GO_PFADE=""
 R_UEBERDECKT=0
 R_ABBRUCH=0
@@ -86,6 +134,12 @@ r_gruppe_abschliessen() {
       R_UEBERDECKT=$((R_UEBERDECKT + 1))
     done
     return 0
+  fi
+
+  # Neuer Block mit mehreren Gruppen: ankuendigen, dass jetzt Aehnliches kommt
+  if [ "$R_BLOCK" != "$R_BLOCK_GEZEIGT" ]; then
+    R_BLOCK_GEZEIGT="$R_BLOCK"
+    [ "$R_BLOCK_N" -ge 2 ] && printf '\n%s── %s · %d Gruppen%s\n' "$fett" "$R_BLOCK" "$R_BLOCK_N" "$aus"
   fi
 
   R_NR=$((R_NR + 1))
@@ -263,13 +317,8 @@ befehl_review() {
   fi
 
   local sortiert="$ARBEIT/review_sortiert.tsv"
-  # Nach Gruppengroesse absteigend: das Lohnende zuerst, Kleinkram zuletzt.
-  # Nur offene Eintraege zaehlen fuer die Reihenfolge.
-  awk -F'\t' 'NR==FNR { if ($1=="neu") summe[$7]+=$3; next } { print summe[$7]+0 "\t" $0 }' \
-      "$gefiltert" "$gefiltert" \
-    | sort -t$'\t' -k1,1nr -k8,8 -k4,4nr \
-    | cut -f2- > "$sortiert"
-  R_GESAMT="$(awk -F'\t' '$1=="neu"{print $7}' "$sortiert" | sort -u | wc -l | tr -d ' ')"
+  review_sortieren "$gefiltert" > "$sortiert"
+  R_GESAMT="$(awk -F'\t' '$3=="neu"{print $9}' "$sortiert" | sort -u | wc -l | tr -d ' ')"
   [ "$R_GESAMT" -eq 0 ] && { info "Alles in dieser Auswahl ist bereits entschieden."; return 0; }
 
   info "\n${fett}Durchsicht${aus}  —  ${R_GESAMT} offene $([ "$R_GESAMT" -eq 1 ] && echo Gruppe || echo Gruppen)"
@@ -279,19 +328,21 @@ befehl_review() {
     info "${grau}Einträge desselben Programms sind zusammengefasst.${aus}"
   fi
 
-  R_PUFFER=(); R_AUSGABE=(); R_ABBRUCH=0; R_NR=0; R_UEBERDECKT=0
+  R_PUFFER=(); R_AUSGABE=(); R_ABBRUCH=0; R_NR=0; R_UEBERDECKT=0; R_BLOCK_GEZEIGT=""
   # Schon freigegebene Ordner merken: Was darin liegt, wird mitverschoben
   # und muss nicht noch einmal gefragt werden.
   R_GO_PFADE="$(awk -F'\t' '$1=="go"{print $5}' "$KANDIDATEN")"
-  local letzte="" zeile g st kt kb mt pfad grund
+  local letzte="" roh block block_n zeile g st kt kb mt pfad grund
   trap r_unterbrochen INT
-  while IFS= read -r zeile <&3; do
+  while IFS= read -r roh <&3; do
+    felder_lesen "$roh" block block_n
+    zeile="${roh#*$'\t'}"; zeile="${zeile#*$'\t'}"
     felder_lesen "$zeile" st kt kb mt pfad grund g
     if [ -n "$letzte" ] && [ "$g" != "$letzte" ]; then
       r_gruppe_abschliessen
       R_PUFFER=()
     fi
-    letzte="$g"
+    letzte="$g"; R_BLOCK="$block"; R_BLOCK_N="$block_n"
     R_PUFFER+=("$zeile")
   done 3< "$sortiert"
   r_gruppe_abschliessen
