@@ -258,9 +258,9 @@ deshalb getrennt als „wieder angelegt“ und schlägt `restore --ersetzen` vor
 ```
 
 Dafür hält das Manifest jedes Stapels die Kategorie fest. Stapel ohne diese
-Spalte stammen aus älteren Versionen; ihre Einträge gelten als unbekannt und
-werden von `--wieder-da` nicht angefasst — die Kategorie aus dem Pfad zu
-raten ginge schief, weil App-Reste auch in `~/Library/Caches` liegen.
+Spalte stammen aus älteren Versionen; `pruefen` führt ihre Einträge eigens als
+„Kategorie unbekannt“, und `--wieder-da` lässt sie aus — die Kategorie aus dem
+Pfad zu raten ginge schief, weil App-Reste auch in `~/Library/Caches` liegen.
 
 Beide verlangen, dass du `LOESCHEN` tippst. Liegen in den fälligen Stapeln
 Originale neu kodierter Videos, nennt `purge` sie vorher eigens: An ihrem

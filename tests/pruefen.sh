@@ -725,6 +725,23 @@ FFPROBE
   pruefe "kodiert und geprüft" gleich "$(video_status "$H/Film/gopro.mov")" fertig
 }
 
+# Stapel aus aelteren Versionen haben keine Kategorie im Manifest. pruefen
+# fuehrte ihre wieder aufgetauchten Eintraege unter "kein Cache" -- auch den
+# Homebrew-Cache. Die Kategorie ist aber unbekannt, nicht "kein Cache".
+test_pruefen_ohne_kategorie() {
+  sandbox
+  local s="$Q/2026-01-01_120000"
+  mkdir -p "$s/Library/Caches/Homebrew" "$H/Library/Caches/Homebrew"
+  printf 'Library/Caches/Homebrew\t%s\t4000\tverschoben\n' "$H/Library/Caches/Homebrew" > "$s/_manifest.tsv"
+  local ausgabe; ausgabe="$(ff pruefen)"
+  pruefe "nennt die unbekannte Kategorie" enthaelt "$ausgabe" "Kategorie unbekannt"
+  pruefe "nicht unter kein Cache" nicht enthaelt "$ausgabe" "kein Cache"
+  ausgabe="$(echo n | ff purge --wieder-da)"
+  pruefe "purge --wieder-da nennt sie ohne Kategorie" enthaelt "$ausgabe" "ohne Kategorie"
+  pruefe "und nicht als keine Caches" nicht enthaelt "$ausgabe" "keine Caches"
+  pruefe "und lässt sie liegen" test -d "$s/Library/Caches/Homebrew"
+}
+
 # purge --wieder-da laesst die Originale neu kodierter Videos aus, das
 # gewoehnliche purge loeschte sie mit, ohne sie zu erwaehnen.
 test_purge_nennt_videooriginale() {

@@ -399,7 +399,7 @@ befehl_restore() {
 befehl_pruefen() {
   [ -d "$QUARANTAENE" ] || { info "Quarantäne ist leer."; return 0; }
   local gesamt_wieder=0 gesamt_fehlt=0 kb_wieder=0 kb_fehlt=0 gesamt_ersetzt=0 kb_ersetzt=0
-  local gesamt_angelegt=0 kb_angelegt=0
+  local gesamt_angelegt=0 kb_angelegt=0 gesamt_unbekannt=0 kb_unbekannt=0
   local stapelordner rel original kb kat name tage
 
   while IFS= read -r stapelordner; do
@@ -408,8 +408,8 @@ befehl_pruefen() {
     tage="$(stapel_alter_tage "$stapelordner")"
 
     titel "$name  ($(vor_tagen "$tage"))"
-    local w=0 f=0 e=0 a=0 wkb=0 fkb=0 ekb=0 akb=0 unbekannt=0 art
-    local -a wieder=() angelegt=()
+    local w=0 f=0 e=0 a=0 u=0 wkb=0 fkb=0 ekb=0 akb=0 ukb=0 art
+    local -a wieder=() angelegt=() unbekannt=()
     while IFS=$'\t' read -r rel original kb art kat; do
       [ -n "$rel" ] || continue
       if [ "$art" = "ersetzt" ]; then
@@ -417,11 +417,16 @@ befehl_pruefen() {
       elif [ -e "$original" ] && nachwachsend "$kat"; then
         w=$((w + 1)); wkb=$((wkb + kb))
         wieder+=("$(printf '%s\t%s' "$kb" "$original")")
+      elif [ -e "$original" ] && [ -z "$kat" ]; then
+        # Stapel aus aelteren Versionen: Ob Cache oder App-Rest, steht nicht
+        # im Manifest. Aus dem Pfad zu raten ginge schief -- App-Reste liegen
+        # auch in ~/Library/Caches.
+        u=$((u + 1)); ukb=$((ukb + kb))
+        unbekannt+=("$(printf '%s\t%s' "$kb" "$original")")
       elif [ -e "$original" ]; then
         # Wieder da, aber kein Cache: eher ein Warnsignal als eine Entwarnung
         a=$((a + 1)); akb=$((akb + kb))
-        [ -n "$kat" ] || unbekannt=$((unbekannt + 1))
-        angelegt+=("$(printf '%s\t%s\t%s' "$kb" "$original" "${kat:-?}")")
+        angelegt+=("$(printf '%s\t%s\t%s' "$kb" "$original" "$kat")")
       else
         f=$((f + 1)); fkb=$((fkb + kb))
       fi
@@ -430,6 +435,7 @@ befehl_pruefen() {
     [ "$w" -gt 0 ] && info "  ${gruen}$w wieder aufgebaut${aus} ($(mb "$wkb"))   ${grau}—  von selbst zurückgekehrt, die Quarantänekopie ist überflüssig${aus}"
     [ "$f" -gt 0 ] && info "  $f noch verschwunden ($(mb "$fkb"))   ${grau}—  hat dir bisher nichts gefehlt${aus}"
     [ "$a" -gt 0 ] && info "  ${gelb}$a wieder angelegt${aus} ($(mb "$akb"))   ${grau}—  keine Caches: wird das doch benutzt?${aus}"
+    [ "$u" -gt 0 ] && info "  ${gelb}$u wieder da, Kategorie unbekannt${aus} ($(mb "$ukb"))   ${grau}—  Stapel aus einer älteren Version${aus}"
     if [ "$e" -gt 0 ]; then
       info "  ${gelb}$e ersetzt${aus} ($(mb "$ekb"))   ${grau}—  Originale neu kodierter Videos${aus}"
       info "    ${grau}Am Originalort liegt die neue Fassung, nicht etwas Nachgewachsenes."
@@ -456,18 +462,29 @@ befehl_pruefen() {
       info "  fehlen die alten Daten, die hier liegen. Zurückholen, die neue Fassung"
       info "  wird dabei nur beiseitegelegt (gilt für den ganzen Stapel):${aus}"
       info "    ${fett}$0 restore $name --ersetzen${aus}"
-      [ "$unbekannt" -gt 0 ] && info "  ${grau}$unbekannt davon stammen aus einem Stapel ohne Kategorie (älter als diese Version)"
-      [ "$unbekannt" -gt 0 ] && info "  und werden deshalb vorsichtshalber genauso behandelt.${aus}"
       info "  ${grau}purge --wieder-da lässt diese Einträge aus.${aus}"
+    fi
+    if [ "$u" -gt 0 ]; then
+      info "\n  ${grau}Wieder da, Kategorie unbekannt:${aus}"
+      printf '%s\n' "${unbekannt[@]}" | sort -t$'\t' -k1,1nr | head -8 \
+        | while IFS=$'\t' read -r kb original; do
+            printf '    %8s  %s\n' "$(mb "$kb")" "${original/#$HOME/$TILDE}"
+          done
+      info "  ${grau}Dieser Stapel stammt aus einer Version, die die Kategorie noch nicht"
+      info "  festhielt. Ein nachgewachsener Cache ist entbehrlich, ein neu angelegter"
+      info "  App-Ordner ein Zeichen, dass die App benutzt wird — welches von beiden,"
+      info "  lässt sich hier nicht sagen. purge --wieder-da lässt diese Einträge aus.${aus}"
     fi
     gesamt_wieder=$((gesamt_wieder + w)); gesamt_fehlt=$((gesamt_fehlt + f))
     kb_wieder=$((kb_wieder + wkb)); kb_fehlt=$((kb_fehlt + fkb))
     gesamt_ersetzt=$((gesamt_ersetzt + e)); kb_ersetzt=$((kb_ersetzt + ekb))
     gesamt_angelegt=$((gesamt_angelegt + a)); kb_angelegt=$((kb_angelegt + akb))
+    gesamt_unbekannt=$((gesamt_unbekannt + u)); kb_unbekannt=$((kb_unbekannt + ukb))
   done < <(stapel_auflisten ohne-verdraengt)
 
   local zusatz=""
   [ "$gesamt_angelegt" -gt 0 ] && zusatz=", $gesamt_angelegt wieder angelegt ($(mb "$kb_angelegt"))"
+  [ "$gesamt_unbekannt" -gt 0 ] && zusatz="$zusatz, $gesamt_unbekannt wieder da ohne Kategorie ($(mb "$kb_unbekannt"))"
   [ "$gesamt_ersetzt" -gt 0 ] && zusatz="$zusatz, $gesamt_ersetzt ersetzt ($(mb "$kb_ersetzt"))"
   info "\n${fett}Zusammen:${aus} $gesamt_wieder wieder da ($(mb "$kb_wieder")), $gesamt_fehlt verschwunden ($(mb "$kb_fehlt"))$zusatz"
 }
@@ -571,7 +588,7 @@ purge_wieder_da() {
   [ ${#stapelliste[@]} -eq 0 ] && { info "Quarantäne ist leer."; return 0; }
 
   # Erst zaehlen, dann fragen
-  local gesamt=0 kb=0 uebergangen=0 kein_cache=0 sordner rel original ekb art kat
+  local gesamt=0 kb=0 uebergangen=0 kein_cache=0 ohne_kat=0 sordner rel original ekb art kat
   for sordner in "${stapelliste[@]}"; do
     [ -f "$sordner/_manifest.tsv" ] || continue
     while IFS=$'\t' read -r rel original ekb art kat; do
@@ -581,6 +598,7 @@ purge_wieder_da() {
       [ "$art" = "ersetzt" ] && { uebergangen=$((uebergangen+1)); continue; }
       [ -e "$original" ] && [ -e "$sordner/$rel" ] || continue
       # Wieder angelegt, aber kein Cache: das ist kein Beleg fuer Entbehrlichkeit
+      [ -n "$kat" ] || { ohne_kat=$((ohne_kat+1)); continue; }
       nachwachsend "$kat" || { kein_cache=$((kein_cache+1)); continue; }
       gesamt=$((gesamt+1)); kb=$((kb+ekb))
     done < "$sordner/_manifest.tsv"
@@ -588,6 +606,10 @@ purge_wieder_da() {
   if [ "$uebergangen" -gt 0 ]; then
     info "${grau}$uebergangen Originale neu kodierter Videos bleiben aussen vor —"
     info "dort liegt die neue Fassung, nicht etwas Nachgewachsenes.${aus}"
+  fi
+  if [ "$ohne_kat" -gt 0 ]; then
+    info "${grau}$ohne_kat wieder da, aber ohne Kategorie im Manifest (ältere Version) — ob Cache,"
+    info "lässt sich nicht sagen. Sie bleiben aussen vor.${aus}"
   fi
   if [ "$kein_cache" -gt 0 ]; then
     info "${grau}$kein_cache wieder angelegte Einträge sind keine Caches und bleiben aussen vor —"
