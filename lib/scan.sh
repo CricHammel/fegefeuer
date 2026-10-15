@@ -247,6 +247,7 @@ befehl_scan() {
   local hashdatei="$ARBEIT/hashes.tsv"
   local dateiliste="$ARBEIT/hash_liste.txt"
   local rohhashes="$ARBEIT/hash_roh.txt"
+  local groessen="$ARBEIT/hash_groessen.txt"
   # ~/Library bleibt komplett aussen vor: dort liegen Systemindex und
   # OneDrive-Sync -- gleiche Inhalte sind da gewollt bzw. serverseitig.
   # Darum such_orte ohne ~/Library: find steigt gar nicht erst hinein.
@@ -268,24 +269,40 @@ befehl_scan() {
   fortschritt "${#orte[@]}" "${#orte[@]}" "gesammelt"
   fortschritt_ende
 
-  local zu_hashen
-  zu_hashen="$(tr -dc '\0' < "$dateiliste" | wc -c | tr -d ' ')"
-  info "  ${grau}$zu_hashen Dateien werden geprüft${aus}"
+  # Gehasht wird nur, was eine gleich grosse Partnerdatei hat -- Dubletten
+  # sind gleich gross. Auf einem echten Mac blieben so von 41 GB nur 1,1 GB,
+  # und eine einzelne Datei von 15,8 GB fiel weg, die allein die Haelfte der
+  # Zeit kostete.
+  local zu_hashen zu_hashen_kb gesammelt
+  gesammelt="$(tr -dc '\0' < "$dateiliste" | wc -c | tr -d ' ')"
+  xargs -0 stat -f '%z %N' < "$dateiliste" 2>/dev/null \
+    | LC_ALL=C awk '{ g = $1; p = substr($0, length(g) + 2); groesse[NR] = g; pfad[NR] = p; anzahl[g]++ }
+        END { for (i = 1; i <= NR; i++) if (anzahl[groesse[i]] >= 2) print groesse[i] "\t" pfad[i] }' \
+    > "$groessen"
+  zu_hashen="$(wc -l < "$groessen" | tr -d ' ')"
+  zu_hashen_kb="$(awk -F'\t' '{ s += $1 } END { printf "%d", s / 1024 }' "$groessen")"
+  LC_ALL=C awk -F'\t' '{ printf "%s%c", $2, 0 }' "$groessen" > "$dateiliste"
+  info "  ${grau}$gesammelt Dateien, $zu_hashen davon mit gleich großer Partnerdatei ($(mb "$zu_hashen_kb")) werden geprüft${aus}"
 
+  # Der Balken zaehlt Bytes, nicht Dateien: Eine einzige grosse Datei kostet
+  # mehr Zeit als Tausende kleine, und ein Balken nach Dateien stand dann
+  # lange kurz vor dem Ende.
   : > "$rohhashes"
   fortschritt_start
   xargs -0 -P 8 -n 200 shasum -a 1 < "$dateiliste" > "$rohhashes" 2>/dev/null &
   local hash_pid=$!
   while kill -0 "$hash_pid" 2>/dev/null; do
-    fortschritt "$(wc -l < "$rohhashes" | tr -d ' ')" "$zu_hashen" "Prüfsummen berechnen"
+    fortschritt "$(LC_ALL=C awk -F'\t' 'NR == FNR { g[$2] = $1; next }
+        { s += g[substr($0, 43)] } END { printf "%d", s / 1024 }' "$groessen" "$rohhashes")" \
+      "$zu_hashen_kb" "Prüfsummen berechnen"
     sleep 1
   done
   wait "$hash_pid" 2>/dev/null
-  fortschritt "$zu_hashen" "$zu_hashen" "Prüfsummen berechnen"
+  fortschritt "$zu_hashen_kb" "$zu_hashen_kb" "Prüfsummen berechnen"
   fortschritt_ende
 
   awk '{ print substr($0,1,40) "\t" substr($0,43) }' "$rohhashes" | sort > "$hashdatei"
-  rm -f "$dateiliste" "$rohhashes"
+  rm -f "$dateiliste" "$rohhashes" "$groessen"
 
   # Alle Mitglieder einer Gruppe werden Kandidaten und bekommen denselben
   # Gruppenschluessel. Erst im review wird entschieden, welche Kopie bleibt --

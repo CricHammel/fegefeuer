@@ -103,8 +103,10 @@ auch wenn sie nicht die neueste ist. Aliase wie `20`, `node` oder `lts/*`
 werden so aufgelöst, wie nvm es tut. Passt der Standard zu keiner
 installierten Version, schlägt `scan` gar keine Node-Version vor.
 
-Die Mindestgröße für den Dublettenvergleich lässt sich setzen — hashen kostet
-Zeit, und unter einer gewissen Größe lohnt die Mühe selten:
+Gehasht wird nur, was eine gleich große Partnerdatei hat — Dubletten sind
+gleich groß. Das sind meist wenige Prozent der Dateien. Die Mindestgröße für
+den Vergleich lässt sich setzen; unter einer gewissen Größe lohnt die Mühe
+selten:
 
 ```bash
 ./fegefeuer.sh scan --dubletten-ab 10M

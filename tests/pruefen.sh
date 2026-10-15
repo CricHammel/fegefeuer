@@ -805,6 +805,30 @@ test_scan_fortschritt_schritt_4_und_5() {
   pruefe "Schritt 5 zeigt beim Sammeln einen Balken" enthaelt "$s5" "%"
 }
 
+# Dubletten sind gleich gross. Gehasht wurde trotzdem jede Datei -- auf einem
+# echten Mac 41 GB, davon eine einzelne von 15,8 GB, waehrend nur 1,1 GB
+# ueberhaupt einen gleich grossen Partner hatten. Ein shasum, das mitschreibt,
+# zeigt, was gehasht wird.
+test_scan_hasht_nur_gleich_grosse() {
+  sandbox
+  mkdir -p "$H/d"
+  head -c 3000000 /dev/urandom > "$H/d/x.bin"; cp "$H/d/x.bin" "$H/d/y.bin"
+  head -c 3000001 /dev/urandom > "$H/d/einzeln.bin"
+  local bin="$WURZEL/$aktuell/bin" log="$WURZEL/$aktuell/shasum.log" echt
+  echt="$(command -v shasum)"
+  mkdir -p "$bin"
+  cat > "$bin/shasum" <<SHASUM
+#!/bin/bash
+printf '%s\n' "\$@" >> "$log"
+exec "$echt" "\$@"
+SHASUM
+  chmod +x "$bin/shasum"
+  PATH="$bin:$PATH" ff scan > /dev/null
+  pruefe "Datei ohne gleich großen Partner nicht gehasht" nicht grep -q 'einzeln.bin' "$log"
+  pruefe "gleich große Dateien gehasht" grep -q 'x.bin' "$log"
+  pruefe "Dublette weiter gefunden" gleich "$(status_von "$H/d/x.bin") $(status_von "$H/d/y.bin")" "neu neu"
+}
+
 # purge --wieder-da laesst die Originale neu kodierter Videos aus, das
 # gewoehnliche purge loeschte sie mit, ohne sie zu erwaehnen.
 test_purge_nennt_videooriginale() {
