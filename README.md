@@ -552,8 +552,8 @@ entbehrlich. So aber lassen `pruefen` und `purge --wieder-da` es aus.
 | `FEGEFEUER_FORTSCHRITT=1` bzw. `=0` | Fortschrittsbalken erzwingen bzw. abschalten (Standard: nur am Terminal) |
 | `FEGEFEUER_SSIM_MIN=0.90` | Untergrenze der Bildähnlichkeit bei `video run` |
 
-Die langen Schritte — Prüfsummen, Vermessen, Kodieren, Prüfen — zeigen einen
-Balken auf stderr, damit Pipelines und Logdateien sauber bleiben:
+Die langen Schritte — Durchsuchen, Prüfsummen, Vermessen, Kodieren, Prüfen —
+zeigen einen Balken auf stderr, damit Pipelines und Logdateien sauber bleiben:
 
 ```
   ██████████░░░░░░░░░░░░   46%  kodiere  noch 3:20

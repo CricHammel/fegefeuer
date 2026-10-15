@@ -36,9 +36,10 @@ sandbox() {
 }
 
 # fegefeuer in der Sandbox aufrufen. Eingaben kommen ueber stdin, die
-# Ausgabe ohne Farbcodes nach stdout.
+# Ausgabe ohne Farbcodes nach stdout. Die Fortschrittsanzeige ist aus;
+# FF_FORTSCHRITT=1 schaltet sie fuer Tests ein, die sie pruefen.
 ff() {
-  HOME="$H" FEGEFEUER_DATEN="$D" FEGEFEUER_FORTSCHRITT=0 \
+  HOME="$H" FEGEFEUER_DATEN="$D" FEGEFEUER_FORTSCHRITT="${FF_FORTSCHRITT:-0}" \
     bash "$REPO/fegefeuer.sh" "$@" 2>&1 | sed $'s/\033\\[[0-9;]*[A-Za-z]//g'
 }
 
@@ -788,6 +789,20 @@ test_purge_alter_aus_name() {
   local ausgabe; ausgabe="$(echo n | ff purge)"
   pruefe "alter Stapel ist fällig" enthaelt "$ausgabe" "1 Stapel"
   pruefe "nach Nein bleibt er" test -f "$s/Library/Caches/foo"
+}
+
+# Schritt 4 meldete sich nur, wenn find eine Datei ueber 200 MB fand --
+# auf den meisten Platten fast nie, der Schritt stand also ohne Anzeige da.
+# Das Sammeln in Schritt 5 zeigte nur einen festen Text.
+test_scan_fortschritt_schritt_4_und_5() {
+  sandbox
+  mkdir -p "$H/a" "$H/b" "$H/Library/Caches"
+  local ausgabe; ausgabe="$(FF_FORTSCHRITT=1 ff scan)"
+  local s4 s5
+  s4="$(printf '%s' "$ausgabe" | sed -n '/4\/5/,/5\/5/p')"
+  s5="$(printf '%s' "$ausgabe" | sed -n '/5\/5/,/werden geprüft/p')"
+  pruefe "Schritt 4 zeigt einen Balken" enthaelt "$s4" "%"
+  pruefe "Schritt 5 zeigt beim Sammeln einen Balken" enthaelt "$s5" "%"
 }
 
 # purge --wieder-da laesst die Originale neu kodierter Videos aus, das

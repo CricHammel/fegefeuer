@@ -41,6 +41,24 @@ nvm_aufloesen() {   # nvm_aufloesen <alias> [tiefe]
   printf '%s\n' "$treffer"
 }
 
+# Die Orte, die scan einzeln durchsucht: was direkt im Home liegt und, wo
+# gefragt, die Unterordner von ~/Library -- dort liegt das meiste. Ein
+# einziges find ueber alles sagt nicht, wie weit es ist; Ort fuer Ort laesst
+# sich ein Balken zeigen. NUL-getrennt.
+such_orte() {   # such_orte [ohne-library]
+  find "$HOME" -mindepth 1 -maxdepth 1 ! -path "$HOME/Library" -print0 2>/dev/null
+  [ "${1:-}" = "ohne-library" ] && return 0
+  find "$HOME/Library" -mindepth 1 -maxdepth 1 -print0 2>/dev/null
+}
+
+# Ort fuer die Fortschrittszeile: mit ~ und hoechstens 40 Zeichen, damit die
+# Zeile nicht umbricht und sich nicht mehr selbst ueberschreibt.
+ort_kurz() {   # ort_kurz <pfad>
+  local k="${1/#$HOME/$TILDE}"
+  [ ${#k} -gt 40 ] && k="${k:0:39}…"
+  printf '%s' "$k"
+}
+
 # ---------- Schritt 1: App-Reste ----------
 scan_app_reste() {
   local -a ordnerliste=("Application Support" "Caches" "Containers" "Group Containers" \
@@ -194,28 +212,34 @@ befehl_scan() {
   info "  fertig"
 
   titel "4/5  Große Dateien und Pakete (>200 MB)"
-  fortschritt_start
-  local n=0 durchsucht=0 paket_kb
+  local n=0 paket_kb ort i
+  local -a orte=()
+  while IFS= read -r -d '' ort; do orte+=("$ort"); done < <(such_orte)
   # Ein Durchlauf fuer beides: Ein Paket (App, VM, Projekt) wird als Ganzes
   # gemeldet, und -prune verhindert, dass find hineinsteigt -- seine
   # Einzeldateien zu verschieben beschaedigte es.
   local -a ausschluss=(! -path "*/.Trash/*" "${MEDIATHEK_AUSSCHLUSS[@]}" "${INTERN_AUSSCHLUSS[@]}"
                        "${WOLKEN_AUSSCHLUSS[@]}")
-  while IFS= read -r -d '' f; do
-    durchsucht=$((durchsucht + 1))
-    fortschritt_offen "durchsuche … $durchsucht Treffer geprüft"
-    ist_geschuetzt "$f" && continue
-    if [ -d "$f" ]; then
-      paket_kb="$(du -sk -x "$f" 2>/dev/null | cut -f1)"
-      [ "${paket_kb:-0}" -gt 204800 ] || continue
-      kandidat_schreiben "gross" "$f" "$(paket_art "$f") — nur als Ganzes verschiebbar"
-    else
-      kandidat_schreiben "gross" "$f" "große Einzeldatei — bitte einzeln prüfen"
-    fi
-    n=$((n+1))
-  done < <(find "$HOME" "${ausschluss[@]}" \
-             \( -type d \( "${PAKET_NAMEN[@]}" \) -print0 -prune \
-                -o -type f -size +200M -print0 \) 2>/dev/null)
+  fortschritt_start
+  i=0
+  for ort in "${orte[@]+"${orte[@]}"}"; do
+    fortschritt "$i" "${#orte[@]}" "durchsuche $(ort_kurz "$ort")"
+    i=$((i + 1))
+    while IFS= read -r -d '' f; do
+      ist_geschuetzt "$f" && continue
+      if [ -d "$f" ]; then
+        paket_kb="$(du -sk -x "$f" 2>/dev/null | cut -f1)"
+        [ "${paket_kb:-0}" -gt 204800 ] || continue
+        kandidat_schreiben "gross" "$f" "$(paket_art "$f") — nur als Ganzes verschiebbar"
+      else
+        kandidat_schreiben "gross" "$f" "große Einzeldatei — bitte einzeln prüfen"
+      fi
+      n=$((n+1))
+    done < <(find "$ort" "${ausschluss[@]}" \
+               \( -type d \( "${PAKET_NAMEN[@]}" \) -print0 -prune \
+                  -o -type f -size +200M -print0 \) 2>/dev/null)
+  done
+  fortschritt "${#orte[@]}" "${#orte[@]}" "durchsucht"
   fortschritt_ende
   info "  ${fett}$n${aus} gefunden"
 
@@ -225,17 +249,27 @@ befehl_scan() {
   local rohhashes="$ARBEIT/hash_roh.txt"
   # ~/Library bleibt komplett aussen vor: dort liegen Systemindex und
   # OneDrive-Sync -- gleiche Inhalte sind da gewollt bzw. serverseitig.
+  # Darum such_orte ohne ~/Library: find steigt gar nicht erst hinein.
+  orte=()
+  while IFS= read -r -d '' ort; do orte+=("$ort"); done < <(such_orte ohne-library)
+  : > "$dateiliste"
   fortschritt_start
-  fortschritt_offen "Dateien sammeln …"
-  find "$HOME" -type f -size +"$find_groesse" \
-    ! -path "$HOME/Library/*" ! -path "*/.Trash/*" ! -path "*/node_modules/*" \
-    ! -path "*/.git/*" ! -path "*/.nvm/*" ! -path "*/.pyenv/*" ! -path "*/.m2/*" \
-    ! -path "*/.cargo/*" "${MEDIATHEK_AUSSCHLUSS[@]}" "${INTERN_AUSSCHLUSS[@]}" "${WOLKEN_AUSSCHLUSS[@]}" \
-    "${PAKET_AUSSCHLUSS[@]}" "${UMGEBUNG_AUSSCHLUSS[@]}" \
-    -print0 2>/dev/null > "$dateiliste"
+  i=0
+  for ort in "${orte[@]+"${orte[@]}"}"; do
+    fortschritt "$i" "${#orte[@]}" "sammle $(ort_kurz "$ort")"
+    i=$((i + 1))
+    find "$ort" -type f -size +"$find_groesse" \
+      ! -path "*/.Trash/*" ! -path "*/node_modules/*" \
+      ! -path "*/.git/*" ! -path "*/.nvm/*" ! -path "*/.pyenv/*" ! -path "*/.m2/*" \
+      ! -path "*/.cargo/*" "${MEDIATHEK_AUSSCHLUSS[@]}" "${INTERN_AUSSCHLUSS[@]}" "${WOLKEN_AUSSCHLUSS[@]}" \
+      "${PAKET_AUSSCHLUSS[@]}" "${UMGEBUNG_AUSSCHLUSS[@]}" \
+      -print0 2>/dev/null >> "$dateiliste"
+  done
+  fortschritt "${#orte[@]}" "${#orte[@]}" "gesammelt"
+  fortschritt_ende
+
   local zu_hashen
   zu_hashen="$(tr -dc '\0' < "$dateiliste" | wc -c | tr -d ' ')"
-  fortschritt_ende
   info "  ${grau}$zu_hashen Dateien werden geprüft${aus}"
 
   : > "$rohhashes"
