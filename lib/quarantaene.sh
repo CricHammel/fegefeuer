@@ -404,7 +404,9 @@ befehl_pruefen() {
 
   while IFS= read -r stapelordner; do
     name="$(basename "$stapelordner")"
-    [ -f "$stapelordner/_manifest.tsv" ] || continue
+    # Ohne Eintraege gibt es nichts zu beobachten -- etwa ein Stapel, den ein
+    # abgebrochener Lauf hinterlassen hat. list zeigt ihn, purge loescht ihn.
+    [ -s "$stapelordner/_manifest.tsv" ] || continue
     tage="$(stapel_alter_tage "$stapelordner")"
 
     titel "$name  ($(vor_tagen "$tage"))"

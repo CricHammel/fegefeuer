@@ -742,6 +742,38 @@ test_pruefen_ohne_kategorie() {
   pruefe "und lässt sie liegen" test -d "$s/Library/Caches/Homebrew"
 }
 
+# Ein Stapel ohne Eintraege bleibt etwa nach einem Abbruch zurueck. pruefen
+# zeigte fuer ihn eine leere Ueberschrift.
+test_pruefen_leerer_stapel() {
+  sandbox
+  mkdir -p "$Q/2026-01-01_120000"
+  : > "$Q/2026-01-01_120000/_manifest.tsv"
+  local ausgabe; ausgabe="$(ff pruefen)"
+  pruefe "kein leerer Stapel in der Ausgabe" nicht enthaelt "$ausgabe" "2026-01-01_120000"
+}
+
+# video run legte den Stapel vor dem ersten Video an. Endete der Lauf, bevor
+# ein Original gesichert war -- Strg-C beim Kodieren --, blieb er leer liegen.
+# Ein ffmpeg, das beim Kodieren das Skript beendet, stellt das nach.
+test_video_run_abbruch_ohne_stapel() {
+  sandbox
+  hat_ffmpeg || { ueberspringen "kein ffmpeg"; return 0; }
+  mkdir -p "$H/Film"
+  testvideo "$H/Film/a.mp4"
+  video_freigeben "$H/Film/a.mp4"
+  local bin="$WURZEL/$aktuell/bin" echt; echt="$(command -v ffmpeg)"
+  mkdir -p "$bin"
+  cat > "$bin/ffmpeg" <<FFMPEG
+#!/bin/bash
+case "\$*" in *-progress*) kill -9 "\$PPID"; exit 1;; esac
+exec "$echt" "\$@"
+FFMPEG
+  chmod +x "$bin/ffmpeg"
+  { echo j | PATH="$bin:$PATH" ff video run --profil sparsam; } > /dev/null 2>&1
+  pruefe "kein leerer Stapel" gleich "$(ls "$Q" 2>/dev/null)" ""
+  pruefe "Original am Platz" test -f "$H/Film/a.mp4"
+}
+
 # purge --wieder-da laesst die Originale neu kodierter Videos aus, das
 # gewoehnliche purge loeschte sie mit, ohne sie zu erwaehnen.
 test_purge_nennt_videooriginale() {

@@ -596,7 +596,9 @@ befehl_video_run() {
   local stapel; stapel="$(date '+%Y-%m-%d_%H%M%S')"
   local ziel="$QUARANTAENE/$stapel"
   local manifest="$ziel/_manifest.tsv"
-  mkdir -p "$ziel"; touch "$manifest"
+  # Der Stapel entsteht erst mit dem ersten gesicherten Original. Vorab
+  # angelegt, bliebe er leer liegen, wenn der Lauf vorher endet -- Strg-C
+  # beim Kodieren, Platzmangel schon bei der ersten Datei.
   local tmpdir="$ARBEIT/video_arbeit"
   rm -rf "$tmpdir"; mkdir -p "$tmpdir"
 
