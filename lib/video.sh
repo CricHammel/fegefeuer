@@ -458,16 +458,23 @@ befehl_video_review() {
   info "\n${fett}Videos durchgehen${aus} — $offen offen"
   info "${grau}Die Originale wandern nach bestandener Prüfung ins Fegefeuer.${aus}"
 
-  local -a ausgabe=()
+  local -a ausgabe=() zeilen=()
   local zeile nr=0 abbruch=0 alle=0
+  while IFS= read -r zeile <&3; do zeilen+=("$zeile"); done 3< "$VIDEOLISTE"
+  # Stand vor jeder gestellten Frage, damit z zuruecknehmen kann: Zeile,
+  # Laenge von ausgabe, Zaehler -- wie im review.
+  local -a s_zeile=() s_laenge=() s_nr=()
+  local i=0 sn=0 zurueck z_taste
   trap v_unterbrochen INT
-  while IFS= read -r zeile <&3; do
+  while [ "$i" -lt "${#zeilen[@]}" ]; do
+    zeile="${zeilen[$i]}"
     local st pfad verpackt codec w h fps dauer kb rohkb bpp urteil neu_schnell neu_kb
     felder_lesen "$zeile" st pfad verpackt codec w h fps dauer kb rohkb bpp urteil neu_schnell neu_kb
     if [ "$st" != "neu" ] || [ "$urteil" != "lohnt" ] || [ "$abbruch" -eq 1 ]; then
-      ausgabe+=("$zeile"); continue
+      ausgabe+=("$zeile"); i=$((i + 1)); continue
     fi
-    if [ "$alle" -eq 1 ]; then ausgabe+=("$(status_setzen "$zeile" go)"); continue; fi
+    if [ "$alle" -eq 1 ]; then ausgabe+=("$(status_setzen "$zeile" go)"); i=$((i + 1)); continue; fi
+    s_zeile[sn]=$i; s_laenge[sn]=${#ausgabe[@]}; s_nr[sn]=$nr
     nr=$((nr+1))
     printf '\n%s[%d/%d]%s %s\n' "$grau" "$nr" "$offen" "$aus" "${pfad/#$HOME/$TILDE}"
     printf '  %s%sx%s · %s fps · %s min · %s bpp%s\n' "$grau" "$w" "$h" \
@@ -475,8 +482,9 @@ befehl_video_review() {
       "$(zahl "$bpp" 3)" "$aus"
     printf '  %s%s%s  →  etwa %s%s%s\n' "$fett" "$(mb "$kb")" "$aus" "$fett" "$(mb "$neu_kb")" "$aus"
     local antwort
+    zurueck=0; z_taste=""; [ "$sn" -gt 0 ] && z_taste="z:zurück"
     while true; do
-      tasten "  " "j:neu kodieren" "n:so lassen" "a:alle übrigen freigeben" "o:Finder" "s:später" "q:Ende"
+      tasten "  " "j:neu kodieren" "n:so lassen" "a:alle übrigen freigeben" "o:Finder" "s:später" ${z_taste:+"$z_taste"} "q:Ende"
       printf '  → '
       read -r antwort || antwort=q
       case "$antwort" in
@@ -486,10 +494,24 @@ befehl_video_review() {
         o|O) open -R "$pfad" 2>/dev/null;;
         s|S|"") ausgabe+=("$zeile"); break;;
         q|Q) abbruch=1; ausgabe+=("$zeile"); break;;
+        z|Z)
+          if [ "$sn" -gt 0 ]; then zurueck=1; break; fi
+          printf '  %sNoch nichts zum Zurücknehmen.%s\n' "$gelb" "$aus";;
         *) tasten_bitte '  ';;
       esac
     done
-  done 3< "$VIDEOLISTE"
+    if [ "$zurueck" -eq 1 ]; then
+      sn=$((sn - 1))
+      i=${s_zeile[$sn]}; nr=${s_nr[$sn]}
+      while [ "${#ausgabe[@]}" -gt "${s_laenge[$sn]}" ]; do
+        unset "ausgabe[$(( ${#ausgabe[@]} - 1 ))]"
+      done
+      printf '  %s↶ zurück%s\n' "$grau" "$aus"
+      continue
+    fi
+    sn=$((sn + 1))
+    i=$((i + 1))
+  done
   trap - INT
 
   zeilen_schreiben "$VIDEOLISTE" "${ausgabe[@]+"${ausgabe[@]}"}"

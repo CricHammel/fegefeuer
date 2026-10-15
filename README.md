@@ -178,7 +178,9 @@ eine Zeile ihn an.
 Die Tastenbelegung steht bei **jeder** Frage, nicht nur einmal im Kopf — wer
 150 Dubletten durchgeht, soll nicht raten müssen.
 
-`q` unterbricht jederzeit, der Stand bleibt erhalten. Strg-C ebenso: Was bis
+`z` nimmt die letzte Entscheidung zurück und stellt die Frage erneut, auch
+mehrmals hintereinander; das gilt ebenso in `video review`. `q` unterbricht
+jederzeit, der Stand bleibt erhalten. Strg-C ebenso: Was bis
 dahin entschieden ist, wird gespeichert, bevor das Skript endet. Bereits
 entschiedene Einträge werden nie erneut gefragt, und eine Gruppenantwort
 überschreibt sie nicht.

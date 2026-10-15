@@ -60,6 +60,13 @@ R_UEBERDECKT=0
 R_ABBRUCH=0
 R_NR=0
 R_GESAMT=0
+# Zurueck (z): Vor jeder Frage merkt sich befehl_review den Stand. z stellt
+# den Stand vor der letzten Frage wieder her -- auch alles, was mit ihr ohne
+# Frage erledigt war, etwa der Inhalt eines freigegebenen Ordners.
+R_STAPEL_N=0          # wie viele Fragen sich zuruecknehmen lassen
+R_ZURUECK=0           # r_gruppe_abschliessen: z wurde gedrueckt
+R_GEFRAGT=0           # r_gruppe_abschliessen: es wurde gefragt
+R_Z=""                # "z:zurück" fuer die Legende, wenn es etwas zurueckzunehmen gibt
 
 # Gibt einen Eintrag frei und merkt sich seinen Pfad: Was darin liegt, wandert
 # mit und wird danach nicht mehr gefragt. Alle Freigaben laufen hierueber --
@@ -73,6 +80,22 @@ r_freigeben() {   # r_freigeben <zeile>
 $pfad"
 }
 
+# R_AUSGABE auf die ersten <laenge> Eintraege kuerzen. Von hinten loeschen
+# haelt das Array lueckenlos; "${a[@]:0:n}" klebt in Bash 3.2 bei diesem IFS
+# alles zu einem Wort zusammen.
+r_ausgabe_kuerzen() {   # r_ausgabe_kuerzen <laenge>
+  while [ "${#R_AUSGABE[@]}" -gt "$1" ]; do
+    unset "R_AUSGABE[$(( ${#R_AUSGABE[@]} - 1 ))]"
+  done
+}
+
+# Darf z hier zuruecknehmen? Sonst sagen, warum nicht.
+r_zurueck_moeglich() {   # r_zurueck_moeglich <einzug>
+  [ "$R_STAPEL_N" -gt 0 ] && return 0
+  printf '%s%sNoch nichts zum Zurücknehmen.%s\n' "$1" "$gelb" "$aus"
+  return 1
+}
+
 r_einzeln_fragen() {   # r_einzeln_fragen <zeile>  -> Antwort in R_ANTWORT
   local zeile="$1"
   local st kt kb mt pfad grund
@@ -81,11 +104,11 @@ r_einzeln_fragen() {   # r_einzeln_fragen <zeile>  -> Antwort in R_ANTWORT
   printf '    %s%s · %s%s\n' "$grau" "$grund" "$mt" "$aus"
   local antwort
   while true; do
-    tasten "    " "j:weg" "n:behalten" "o:Finder" "s:später" "q:Ende"
+    tasten "    " "j:weg" "n:behalten" "o:Finder" "s:später" "z:zurück" "q:Ende"
     printf '    → '
     read -r antwort || antwort=q
     case "$antwort" in
-      j|J|n|N|s|S|q|Q) R_ANTWORT="$antwort"; return 0;;
+      j|J|n|N|s|S|q|Q|z|Z) R_ANTWORT="$antwort"; return 0;;
       "") R_ANTWORT=s; return 0;;
       o|O) open -R "$pfad" 2>/dev/null;;
       *) tasten_bitte '    ';;
@@ -143,6 +166,7 @@ r_gruppe_abschliessen() {
   fi
 
   R_NR=$((R_NR + 1))
+  R_GEFRAGT=1
   local etikett grund1 pfad1 mt1 kategorie grp1
   felder_lesen "${offen[0]}" st kategorie kb mt1 pfad1 grund1 grp1 etikett
   [ -n "$etikett" ] || etikett="$(basename "$pfad1")"
@@ -170,10 +194,11 @@ r_gruppe_abschliessen() {
     printf '  %sWelche soll bleiben? Die anderen wandern ins Fegefeuer.%s\n' "$grau" "$aus"
     local antwort k
     while true; do
-      tasten "  " "1-$n_offen:diese behalten" "n:alle behalten" "o:Finder" "s:später" "q:Ende"
+      tasten "  " "1-$n_offen:diese behalten" "n:alle behalten" "o:Finder" "s:später" ${R_Z:+"$R_Z"} "q:Ende"
       printf '  → '
       read -r antwort || antwort=q
       case "$antwort" in
+        z|Z) r_zurueck_moeglich '  ' && { R_ZURUECK=1; return 0; };;
         n|N) for zeile in "${nach_alter[@]}"; do R_AUSGABE+=("$(status_setzen "$zeile" keep)"); done; return 0;;
         o|O) open -R "$pfad_aelteste" 2>/dev/null;;
         s|S|"") for zeile in "${nach_alter[@]}"; do R_AUSGABE+=("$zeile"); done; return 0;;
@@ -215,10 +240,11 @@ r_gruppe_abschliessen() {
     [ "$entschieden" -gt 0 ] && printf '  %s(%d weitere Einträge dieser Gruppe hast du schon entschieden)%s\n' "$grau" "$entschieden" "$aus"
     local antwort
     while true; do
-      tasten "  " "j:weg" "n:behalten" "o:im Finder zeigen" "s:später" "q:Ende"
+      tasten "  " "j:weg" "n:behalten" "o:im Finder zeigen" "s:später" ${R_Z:+"$R_Z"} "q:Ende"
       printf '  → '
       read -r antwort || antwort=q
       case "$antwort" in
+        z|Z) r_zurueck_moeglich '  ' && { R_ZURUECK=1; return 0; };;
         j|J) r_freigeben "${offen[0]}"; return 0;;
         n|N) R_AUSGABE+=("$(status_setzen "${offen[0]}" keep)"); return 0;;
         o|O) open -R "$pfad1" 2>/dev/null;;
@@ -249,10 +275,11 @@ r_gruppe_abschliessen() {
 
   local antwort
   while true; do
-    tasten "  " "j:alle weg" "n:alle behalten" "e:einzeln durchgehen" "o:Finder" "s:später" "q:Ende"
+    tasten "  " "j:alle weg" "n:alle behalten" "e:einzeln durchgehen" "o:Finder" "s:später" ${R_Z:+"$R_Z"} "q:Ende"
     printf '  → '
     read -r antwort || antwort=q
     case "$antwort" in
+      z|Z) r_zurueck_moeglich '  ' && { R_ZURUECK=1; return 0; };;
       j|J) for zeile in "${offen[@]}"; do r_freigeben "$zeile"; done; return 0;;
       n|N) for zeile in "${offen[@]}"; do R_AUSGABE+=("$(status_setzen "$zeile" keep)"); done; return 0;;
       o|O) open -R "$pfad1" 2>/dev/null;;
@@ -260,16 +287,29 @@ r_gruppe_abschliessen() {
       q|Q) R_ABBRUCH=1; for zeile in "${offen[@]}"; do R_AUSGABE+=("$zeile"); done; return 0;;
       e|E)
         printf '  %sGruppe %s einzeln:%s\n' "$grau" "$etikett" "$aus"
-        for zeile in "${offen[@]}"; do
-          if [ "$R_ABBRUCH" -eq 1 ]; then R_AUSGABE+=("$zeile"); continue; fi
+        # Stand vor jedem Eintrag, damit z einen Schritt zuruecknehmen kann.
+        # Vor dem ersten fuehrt z zur Frage fuer die ganze Gruppe.
+        local k=0 n_e=${#offen[@]}
+        local -a e_laenge=() e_go=()
+        while [ "$k" -lt "$n_e" ]; do
+          zeile="${offen[$k]}"
+          if [ "$R_ABBRUCH" -eq 1 ]; then R_AUSGABE+=("$zeile"); k=$((k + 1)); continue; fi
+          e_laenge[k]=${#R_AUSGABE[@]}; e_go[k]="$R_GO_PFADE"
           R_ANTWORT=""
           r_einzeln_fragen "$zeile"
           case "$R_ANTWORT" in
             j|J) r_freigeben "$zeile";;
             n|N) R_AUSGABE+=("$(status_setzen "$zeile" keep)");;
             q|Q) R_ABBRUCH=1; R_AUSGABE+=("$zeile");;
+            z|Z)
+              [ "$k" -gt 0 ] || { printf '  %s↶ zurück zur ganzen Gruppe%s\n' "$grau" "$aus"; continue 2; }
+              k=$((k - 1))
+              r_ausgabe_kuerzen "${e_laenge[$k]}"; R_GO_PFADE="${e_go[$k]}"
+              printf '    %s↶ zurück%s\n' "$grau" "$aus"
+              continue;;
             *)   R_AUSGABE+=("$zeile");;
           esac
+          k=$((k + 1))
         done
         return 0;;
       *) tasten_bitte '  ';;
@@ -332,20 +372,53 @@ befehl_review() {
   # Schon freigegebene Ordner merken: Was darin liegt, wird mitverschoben
   # und muss nicht noch einmal gefragt werden.
   R_GO_PFADE="$(awk -F'\t' '$1=="go"{print $5}' "$KANDIDATEN")"
+  # Alle Gruppen vorab einlesen: z muss zu einer schon abgeschlossenen
+  # zurueckkehren koennen. g_start haelt, wo jede Gruppe in z_zeilen beginnt.
   local letzte="" roh block block_n zeile g st kt kb mt pfad grund
-  trap r_unterbrochen INT
+  local -a z_zeilen=() z_block=() z_block_n=() g_start=()
   while IFS= read -r roh <&3; do
     felder_lesen "$roh" block block_n
     zeile="${roh#*$'\t'}"; zeile="${zeile#*$'\t'}"
     felder_lesen "$zeile" st kt kb mt pfad grund g
-    if [ -n "$letzte" ] && [ "$g" != "$letzte" ]; then
-      r_gruppe_abschliessen
-      R_PUFFER=()
-    fi
-    letzte="$g"; R_BLOCK="$block"; R_BLOCK_N="$block_n"
-    R_PUFFER+=("$zeile")
+    if [ "${#z_zeilen[@]}" -eq 0 ] || [ "$g" != "$letzte" ]; then g_start+=("${#z_zeilen[@]}"); fi
+    letzte="$g"
+    z_zeilen+=("$zeile"); z_block+=("$block"); z_block_n+=("$block_n")
   done 3< "$sortiert"
-  r_gruppe_abschliessen
+  local n_gruppen=${#g_start[@]}
+  g_start+=("${#z_zeilen[@]}")
+
+  # Der Stand vor jeder gestellten Frage, als Stapel: Gruppe, Laenge von
+  # R_AUSGABE, freigegebene Ordner, Zaehler, zuletzt angekuendigter Block.
+  local -a s_gruppe=() s_laenge=() s_go=() s_ueberdeckt=() s_nr=() s_block=()
+  local i=0 j t v_laenge v_go v_ueberdeckt v_nr v_block
+  R_STAPEL_N=0
+  trap r_unterbrochen INT
+  while [ "$i" -lt "$n_gruppen" ]; do
+    R_PUFFER=()
+    j=${g_start[$i]}
+    while [ "$j" -lt "${g_start[$((i + 1))]}" ]; do R_PUFFER+=("${z_zeilen[$j]}"); j=$((j + 1)); done
+    R_BLOCK="${z_block[${g_start[$i]}]}"; R_BLOCK_N="${z_block_n[${g_start[$i]}]}"
+    v_laenge=${#R_AUSGABE[@]}; v_go="$R_GO_PFADE"; v_ueberdeckt=$R_UEBERDECKT
+    v_nr=$R_NR; v_block="$R_BLOCK_GEZEIGT"
+    R_GEFRAGT=0; R_ZURUECK=0
+    R_Z=""; [ "$R_STAPEL_N" -gt 0 ] && R_Z="z:zurück"
+    r_gruppe_abschliessen
+    if [ "$R_ZURUECK" -eq 1 ]; then
+      R_STAPEL_N=$((R_STAPEL_N - 1)); t=$R_STAPEL_N
+      i=${s_gruppe[$t]}
+      r_ausgabe_kuerzen "${s_laenge[$t]}"; R_GO_PFADE="${s_go[$t]}"
+      R_UEBERDECKT=${s_ueberdeckt[$t]}; R_NR=${s_nr[$t]}; R_BLOCK_GEZEIGT="${s_block[$t]}"
+      printf '  %s↶ zurück%s\n' "$grau" "$aus"
+      continue
+    fi
+    if [ "$R_GEFRAGT" -eq 1 ]; then
+      t=$R_STAPEL_N
+      s_gruppe[t]=$i; s_laenge[t]=$v_laenge; s_go[t]="$v_go"
+      s_ueberdeckt[t]=$v_ueberdeckt; s_nr[t]=$v_nr; s_block[t]="$v_block"
+      R_STAPEL_N=$((t + 1))
+    fi
+    i=$((i + 1))
+  done
   trap - INT
 
   { printf '%s\n' "${R_AUSGABE[@]+"${R_AUSGABE[@]}"}" | grep -v '^$'; cat "$rest"; } \

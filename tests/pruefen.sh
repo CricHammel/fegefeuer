@@ -865,6 +865,84 @@ test_review_gross_nach_ordnern() {
   pruefe "Dateien eines Ordners hintereinander" gleich "$reihe" "a.mp4 c.mp4 b.bin "
 }
 
+# z springt zur letzten Frage zurueck und nimmt ihre Entscheidung zurueck
+test_review_zurueck() {
+  sandbox
+  mkdir -p "$H/a" "$H/b"
+  kandidat neu gross 900 "$H/a/gross.bin"
+  kandidat neu gross 100 "$H/b/klein.bin"
+  local ausgabe
+  # j fuer gross.bin, bei klein.bin zurueck, dann gross.bin doch behalten
+  ausgabe="$(printf 'j\nz\nn\nn\n' | ff review)"
+  pruefe "zurückgenommene Freigabe ist keep" gleich "$(status_von "$H/a/gross.bin")" keep
+  pruefe "danach weiter wie gewohnt" gleich "$(status_von "$H/b/klein.bin")" keep
+  pruefe "z steht in der Legende" enthaelt "$ausgabe" "z=zurück"
+}
+
+test_review_zurueck_dublette() {
+  sandbox
+  mkdir -p "$H/a" "$H/b"
+  echo eins > "$H/a/eins.bin"; echo eins > "$H/b/eins.bin"
+  echo zwei > "$H/a/zwei.bin"; echo zwei > "$H/b/zwei.bin"
+  kandidat neu dublette 300 "$H/a/eins.bin" dub-1
+  kandidat neu dublette 300 "$H/b/eins.bin" dub-1
+  kandidat neu dublette 100 "$H/a/zwei.bin" dub-2
+  kandidat neu dublette 100 "$H/b/zwei.bin" dub-2
+  # Die erste behalten, zurueck, dann die zweite behalten
+  printf '1\nz\n2\nn\n' | ff review > /dev/null
+  pruefe "neue Wahl gilt" gleich "$(status_von "$H/a/eins.bin") $(status_von "$H/b/eins.bin")" "go keep"
+  pruefe "nächste Gruppe danach" gleich "$(status_von "$H/a/zwei.bin") $(status_von "$H/b/zwei.bin")" "keep keep"
+}
+
+# Ein freigegebener Ordner erledigt, was darin liegt, ohne Frage. Wird die
+# Freigabe zurueckgenommen, muss auch das wieder offen sein -- und gefragt.
+test_review_zurueck_hebt_mitgewandertes_auf() {
+  sandbox
+  local app="$H/Library/Application Support/com.foo.app"
+  mkdir -p "$app/Cache" "$H/x"
+  kandidat neu app-rest 1000 "$app" foo
+  kandidat neu cache 500 "$app/Cache"
+  kandidat neu gross 100 "$H/x/andere.bin"
+  # j fuer den Ordner (Cache wandert ohne Frage mit), bei andere.bin zurueck,
+  # Ordner behalten, dann wird Cache gefragt: n, dann andere.bin: n
+  printf 'j\nz\nn\nn\nn\n' | ff review > /dev/null
+  pruefe "Ordner behalten" gleich "$(status_von "$app")" keep
+  pruefe "Inhalt nicht mehr mitgewandert" gleich "$(status_von "$app/Cache")" keep
+  pruefe "letzte Gruppe entschieden" gleich "$(status_von "$H/x/andere.bin")" keep
+}
+
+# Im einzelnen Durchgehen einer Gruppe springt z zum vorigen Eintrag
+test_review_zurueck_einzeln() {
+  sandbox
+  mkdir -p "$H/Library/Application Support/com.foo.app" "$H/Library/Caches/com.foo.app"
+  kandidat neu app-rest 1000 "$H/Library/Application Support/com.foo.app" foo
+  kandidat neu app-rest 500 "$H/Library/Caches/com.foo.app" foo
+  printf 'e\nj\nz\nn\nn\n' | ff review > /dev/null
+  pruefe "erster Eintrag neu entschieden" gleich "$(status_von "$H/Library/Application Support/com.foo.app")" keep
+  pruefe "zweiter Eintrag" gleich "$(status_von "$H/Library/Caches/com.foo.app")" keep
+}
+
+# Bei der ersten Frage gibt es nichts zurueckzunehmen
+test_review_zurueck_am_anfang() {
+  sandbox
+  mkdir -p "$H/a"
+  kandidat neu gross 900 "$H/a/gross.bin"
+  local ausgabe; ausgabe="$(printf 'z\nn\n' | ff review)"
+  pruefe "nennt den Grund" enthaelt "$ausgabe" "Noch nichts"
+  pruefe "fragt weiter" gleich "$(status_von "$H/a/gross.bin")" keep
+}
+
+test_video_review_zurueck() {
+  sandbox
+  local p
+  for p in a b; do
+    printf 'neu\t%s\tnein\th264\t1920\t1080\t30\t60\t500000\t500000\t0.5\tlohnt\t0\t100000\n' "$H/$p.mp4" >> "$D/video-kandidaten.tsv"
+  done
+  printf 'j\nz\nn\nn\n' | ff video review > /dev/null
+  pruefe "zurückgenommene Freigabe ist keep" gleich "$(video_status "$H/a.mp4")" keep
+  pruefe "zweites Video" gleich "$(video_status "$H/b.mp4")" keep
+}
+
 # purge --wieder-da laesst die Originale neu kodierter Videos aus, das
 # gewoehnliche purge loeschte sie mit, ohne sie zu erwaehnen.
 test_purge_nennt_videooriginale() {
